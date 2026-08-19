@@ -1,3 +1,4 @@
+
 # Pine Script Indicators
 
 [![X](https://img.shields.io/badge/X-fxraptor__alpha-000000?style=for-the-badge&logo=x)](https://x.com/fxraptor_alpha)
@@ -7,9 +8,9 @@ An organized collection of TradingView Pine Script indicators, with source code,
 
 ## Indicators
 
-| Indicator | Description | Files |
-| --- | --- | --- |
-| Fractal Model | A multi-timeframe sweep, reversal-confirmation, and projection tool. | [Code](fractal-model/fractal-model.pine) · [Guide](fractal-model/README.md) |
+| Indicator     | Description                                                                       | Files                                                                      |
+| ------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Fractal Model | A multi-timeframe sweep, reversal-confirmation, and projection tool.              | [Code](fractal-model/fractal-model.pine) · [Guide](fractal-model/README.md) |
 | Unicorn Model | A liquidity-sweep breaker-block tool with optional Fair Value Gap overlap filter. | [Code](unicorn-model/unicorn-model.pine) · [Guide](unicorn-model/README.md) |
 
 ## Repository Structure

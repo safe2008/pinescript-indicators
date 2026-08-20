@@ -40,8 +40,8 @@ Key finding from investigating the current code before writing this list: `Setup
 - [x] New `alertcondition()`s per period/direction for sweep + CISD confirmation (mirror pattern at `:1061`, `:1491`, `:1726`), gated on `settings.bias` same as existing alerts
 
 ## 9. Object-budget / history management
-- [ ] Apply the same trim-to-`max_setups` pattern (`:1912-1913`) independently per Calendar source
-- [ ] Re-check `max_boxes_count`/`max_lines_count`/`max_labels_count` in the `indicator(...)` call — 3 more parallel tracks add persistent drawing objects; raise if needed and note why
+- [x] Apply the same trim-to-`max_setups` pattern (`:1912-1913`) independently per Calendar source
+- [x] Re-check `max_boxes_count`/`max_lines_count`/`max_labels_count` in the `indicator(...)` call — 3 more parallel tracks add persistent drawing objects; raise if needed and note why
 
 ## 10. Cross-cutting (from broader update scope)
 - [ ] Bug-fix pass over existing sweep/C2/CISD logic (no specific report — general review while in this code)

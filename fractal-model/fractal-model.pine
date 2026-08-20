@@ -2111,6 +2111,18 @@ method UpdatePeriod(CalendarSource source) =>
                 source.cur_low_idx := bar_index
     source
 
+// Trim confirmed-setup history (Task 9) — same "store enough for bias filtering" reasoning as
+// the Fractal HTF path's max_setups pattern (candleSet.settings.max_display + settings.sweep_history) * 2,
+// sized off settings.sweep_history alone since Calendar has no candle-panel max_display term to
+// factor in. Called right after each source.setups.unshift() (in DetectSweep, below) so history
+// never grows unbounded — independently per source, since cal_day/cal_week/cal_month each call
+// this on their own `source`.
+method TrimSetups(CalendarSource source) =>
+    int max_setups = settings.sweep_history * 2
+    while source.setups.size() > max_setups
+        source.setups.pop()
+    source
+
 // Calendar Level sweep detection + CISD confirmation + entry-zone cascade (Tasks 4-6) —
 // ported from the Fractal HTF bearish/bullish tracking blocks in Monitor(). Task 4 covers
 // "wick-through" detection and Setup creation; Task 5 adds CISD-extreme seeding at creation
@@ -2240,6 +2252,7 @@ method DetectSweep(CalendarSource source) =>
                 setup.liq_end_time := time      // no live mitigation consumer for Calendar yet (Task 5 scope)
                 TrySetEntryZoneC4(setup, high, low, close, time, na)  // right_time na = still developing (EntryZoneRight)
                 source.setups.unshift(setup)
+                source.TrimSetups()
                 source.has_live_bearish := false
                 // CISD-trigger alert (Task 8)
                 if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bearish")
@@ -2320,6 +2333,7 @@ method DetectSweep(CalendarSource source) =>
                 setup.liq_end_time := time
                 TrySetEntryZoneC4(setup, high, low, close, time, na)
                 source.setups.unshift(setup)
+                source.TrimSetups()
                 source.has_live_bullish := false
                 // CISD-trigger alert (Task 8)
                 if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bullish")

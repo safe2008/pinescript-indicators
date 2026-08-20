@@ -2096,27 +2096,45 @@ method UpdatePeriod(CalendarSource source) =>
                 source.cur_low_idx := bar_index
     source
 
-// Calendar Level sweep detection + CISD confirmation (Tasks 4-5) — ported from the Fractal
-// HTF bearish/bullish tracking blocks in Monitor(). Task 4 covers "wick-through" detection and
-// Setup creation; Task 5 adds CISD-extreme seeding at creation plus per-bar continuation
-// (tracked_extreme updates, FindCISDLevel recalculation, cisd_end_idx/cisd_triggered, IC-CISD)
-// — mirroring Monitor()'s "not is_post_c2" (C2 phase) branch only. Calendar setups don't go
-// through the HTF-candle-cadence post-C2 cascade (that logic replaces old-C2-becomes-new-C1
-// using candleSet.candles.get(1) — no candle series to cascade against here; see the design
-// note at the top of Tasks.md). CISD confirmation (cisd_triggered) already fully happens
-// within the C2-phase logic on the Fractal path too, so nothing is lost by not porting it.
+// Calendar Level sweep detection + CISD confirmation + entry-zone cascade (Tasks 4-6) —
+// ported from the Fractal HTF bearish/bullish tracking blocks in Monitor(). Task 4 covers
+// "wick-through" detection and Setup creation; Task 5 adds CISD-extreme seeding at creation
+// plus per-bar continuation (tracked_extreme updates, FindCISDLevel recalculation,
+// cisd_end_idx/cisd_triggered, IC-CISD) — mirroring Monitor()'s "not is_post_c2" (C2 phase)
+// branch only, since CISD confirmation (cisd_triggered) already fully happens within that
+// phase on the Fractal path too.
+//
+// Task 6 — C2→C3→C4 cascade, adapted for Calendar (no HTF-candle cadence to promote against):
+// on the Fractal path, is_post_c2/C3/C4 populate across TWO separate isNewHTFCandle-gated
+// transitions (C2 close -> start C3 tracking; C3 close -> finalize C4 + push to history),
+// because "one more candle" is a meaningful wait on that path. Calendar has no such boundary —
+// its only period boundary is the Day/Week/Month rollover itself (Task 3), which is far too
+// coarse to use as a stand-in "one more candle." So the moment CISD confirms (cisd_triggered
+// becomes true) is treated as C2-close/C3-open/C3-close/C4-open all at once, in the same bar:
+// is_post_c2 is set true, TrySetEntryZoneC3/C4 are both called using this bar's own OHLC as
+// the C3/C4 anchors (c2_extreme/c2_mid from the setup's own captured sweep_price/
+// tracked_extreme, c3_open = this bar's open, c3_h/c3_l = this bar's high/low, c4_open =
+// this bar's close), and the setup is immediately pushed to source.setups (history) with
+// has_live_bearish/bullish cleared — same "COMPLETED!" semantics as the Fractal path's C3-close
+// finalization, just without an artificial multi-bar wait that Calendar has no basis for.
+// ez_c4_right_time is left na (TrySetEntryZoneC4's own EntryZoneRight helper already treats na
+// as "still developing" rather than a fixed lock point) since there's no natural Calendar
+// duration to bound it with; reusing the period length itself (Task 1's day/week/month toggle)
+// would make the entry-zone box absurdly wide. liq_end_time is set to a non-na value for field
+// consistency but has no live consumer for Calendar yet (Task 5 left liq_c1/c0_price unset).
+//
 // Runs off the Task 3 period tracker instead of prev_htf/candleSet.candles.first(). Detection
 // and continuation always run when enabled (matches "Live sweep detection - ALWAYS runs" in
 // Monitor() above); cal_settings.sweep_show only gates drawing (Task 7), same as
-// settings.sweep_show does for the Fractal HTF path.
+// settings.sweep_show does for the Fractal HTF path. Reuses global settings.entry_zone_show/
+// proj_type — no per-period copies, per Task 1's convention.
 // Rollover-persistence: setup.sweep_price/tracked_extreme are captured once at creation, then
 // only ever updated incrementally by this method from the raw high/low — never re-derived from
 // source.prior_high/prior_low or source.cur_high/cur_low after creation. A later period
 // rollover overwrites those source fields, but an in-progress setup keeps tracking its own
 // captured state, so confirmation is unaffected by rollover happening mid-tracking.
-// Deferred to Task 6 (projection/entry zone): proj_anchor_0/1, proj_start_idx/end_idx,
-// TrySetEntryZoneC3, liq_end_time. Deferred to Task 8 (alerts): all alert() calls (including
-// the one inside ICUpdate, which still hardcodes htf.settings.htf — flagged, not fixed here).
+// Deferred to Task 8 (alerts): all alert() calls (including the one inside ICUpdate, which
+// still hardcodes htf.settings.htf — flagged in Task 5's report, not fixed here).
 method DetectSweep(CalendarSource source) =>
     if source.enabled and not na(source.prior_high) and not na(source.prior_low)
         bool high_breached = high > source.prior_high
@@ -2175,7 +2193,35 @@ method DetectSweep(CalendarSource source) =>
                 setup.cisd_end_idx := bar_index
             if setup.is_confirmed and setup.has_cisd and not setup.cisd_triggered and not na(setup.cisd_end_idx)
                 setup.cisd_triggered := true
-                // Projection anchors / TrySetEntryZoneC3 / CISD-trigger alert: Task 6 / Task 8
+                // Projection anchors (Task 6) — same bar-index-offset math as the Fractal HTF
+                // path (:1482 area), fully candle-independent
+                int cisd_lookback = bar_index - setup.cisd_start_idx
+                setup.proj_start_idx := setup.cisd_start_idx
+                setup.proj_end_idx := setup.extreme_bar_idx + 1
+                if settings.proj_type == "Wick"
+                    setup.proj_anchor_1 := setup.tracked_extreme
+                    setup.proj_anchor_0 := low[cisd_lookback]
+                else
+                    int extreme_lookback = bar_index - setup.extreme_bar_idx
+                    setup.proj_anchor_1 := math.max(open[extreme_lookback], close[extreme_lookback])
+                    setup.proj_anchor_0 := math.min(open[cisd_lookback], close[cisd_lookback])
+                // Calendar C2→C3→C4 cascade (Task 6): no HTF-candle boundary to wait for, so
+                // CISD confirmation is itself the trigger — collapses C2-close/C3-open/C3-close/
+                // C4-open into this one bar instead of waiting on isNewHTFCandle (see this
+                // method's doc comment for the full design note).
+                setup.is_post_c2 := true
+                setup.ltf_end_idx := bar_index  // Lock sweep line end at confirmation
+                setup.c2_extreme := setup.tracked_extreme            // swing high, for invalidation checks
+                setup.c2_mid := (setup.sweep_price + setup.tracked_extreme) / 2.0  // mid of the sweep→extreme excursion
+                setup.c3_open := open
+                setup.ez_c3_left_time := time
+                TrySetEntryZoneC3(setup)
+                setup.ez_c3_right_time := time  // C3 "closes" the same bar it opens, for Calendar
+                setup.liq_end_time := time      // no live mitigation consumer for Calendar yet (Task 5 scope)
+                TrySetEntryZoneC4(setup, high, low, close, time, na)  // right_time na = still developing (EntryZoneRight)
+                source.setups.unshift(setup)
+                source.has_live_bearish := false
+                // CISD-trigger alert: Task 8
             ICUpdate(setup)
 
         // ===== BULLISH TRACKING (when low is wicked) =====
@@ -2225,6 +2271,32 @@ method DetectSweep(CalendarSource source) =>
                 setup.cisd_end_idx := bar_index
             if setup.is_confirmed and setup.has_cisd and not setup.cisd_triggered and not na(setup.cisd_end_idx)
                 setup.cisd_triggered := true
+                // Projection anchors (Task 6) — bullish mirror of the bearish block above
+                int cisd_lookback = bar_index - setup.cisd_start_idx
+                setup.proj_start_idx := setup.cisd_start_idx
+                setup.proj_end_idx := setup.extreme_bar_idx + 1
+                if settings.proj_type == "Wick"
+                    setup.proj_anchor_1 := setup.tracked_extreme
+                    setup.proj_anchor_0 := high[cisd_lookback]
+                else
+                    int extreme_lookback = bar_index - setup.extreme_bar_idx
+                    setup.proj_anchor_1 := math.min(open[extreme_lookback], close[extreme_lookback])
+                    setup.proj_anchor_0 := math.max(open[cisd_lookback], close[cisd_lookback])
+                // Calendar C2→C3→C4 cascade (Task 6) — see the bearish block above / this
+                // method's doc comment for the full design note
+                setup.is_post_c2 := true
+                setup.ltf_end_idx := bar_index
+                setup.c2_extreme := setup.tracked_extreme            // swing low, for invalidation checks
+                setup.c2_mid := (setup.sweep_price + setup.tracked_extreme) / 2.0
+                setup.c3_open := open
+                setup.ez_c3_left_time := time
+                TrySetEntryZoneC3(setup)
+                setup.ez_c3_right_time := time
+                setup.liq_end_time := time
+                TrySetEntryZoneC4(setup, high, low, close, time, na)
+                source.setups.unshift(setup)
+                source.has_live_bullish := false
+                // CISD-trigger alert: Task 8
             ICUpdate(setup)
     source
 

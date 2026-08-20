@@ -28,8 +28,8 @@ Key finding from investigating the current code before writing this list: `Setup
 - [x] Rollover-persistence: an in-progress (swept, unconfirmed) setup keeps tracking its original swept level to confirmation, even after the calendar period rolls over — only *future* sweeps use the new period's H/L
 
 ## 6. Projection + position sizer — reuse
-- [ ] Confirm `TrySetEntryZoneC3`/`TrySetEntryZoneC4` (`:838`, `:851`) work unmodified against Calendar-sourced `Setup`s
-- [ ] Reuse existing global R:R/projection-ratio inputs — no new per-period copies
+- [x] Confirm `TrySetEntryZoneC3`/`TrySetEntryZoneC4` (`:838`, `:851`) work unmodified against Calendar-sourced `Setup`s
+- [x] Reuse existing global R:R/projection-ratio inputs — no new per-period copies
 
 ## 7. Drawing
 - [ ] Level line (PDH/PDL/PWH/PWL/PMH/PML label) drawn from prior-period H/L, using new Calendar color group

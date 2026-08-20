@@ -133,6 +133,33 @@ type CandleSettings
     string hl_style
     int hl_width
 
+// Calendar Level settings — Day/Week/Month period sweep sources, independent of the
+// Fractal selector. Own color/style scheme, distinct from the Fractal HTF track's
+// settings.sweep_color / c2_color / cisd_*_color / proj_color above.
+type CalendarSettings
+    bool day_enabled
+    bool week_enabled
+    bool month_enabled
+    // Sweep settings
+    bool sweep_show
+    color sweep_color
+    string sweep_style
+    int sweep_size
+    // C2 settings
+    color c2_color
+    string c2_size
+    // CISD settings
+    bool cisd_show
+    color cisd_bull_color
+    color cisd_bear_color
+    int cisd_width
+    string cisd_style
+    // Projection settings
+    bool proj_show
+    color proj_color
+    string proj_style
+    int proj_width
+
 type Settings
     color bull_body
     color bull_border
@@ -255,6 +282,9 @@ htf.sweeps := sweeps_1
 htf.setups := setups_1
 htf.trace := Trace.new()
 
+// Calendar Level settings — shared across the Day/Week/Month sources (later tasks)
+var CalendarSettings cal_settings = CalendarSettings.new()
+
 // Initialize drawing bin
 var DrawingBin bin = DrawingBin.new(
     lines = array.new<line>(),
@@ -272,6 +302,7 @@ var array<float> proj_deviations = array.new_float()
 
 string group_general            = "General Settings  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 string group_htf               = "HTF Candles  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+string group_calendar           = "Calendar Levels  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 string group_sweep              = "Model Settings  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 string group_label              = "Label Settings  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 string group_imbalance          = "Imbalance  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -580,6 +611,33 @@ prev_eq_color                  = input.color(color.rgb(0,0,0,0), '', inline='pre
 prev_eq_style                  = input.string('Dotted', '', options=['Solid','Dashed','Dotted'], inline='prev_eq', group = group_htf, active = prev_eq_show)
 prev_eq_width                  = input.int(1, 'Width', options=[1,2,3,4], inline='prev_eq', group = group_htf, active = prev_eq_show)
 drawings_type                  = input.string('Both', 'Drawings Type', options=['Both', 'On Chart', 'HTF candle'], group = group_htf, tooltip='On Chart: EQ lines on price chart (setup package).\nHTF candle: EQ on HTF projection (later).\nBoth: chart + projection.', active = prev_eq_show)
+
+// Calendar Levels — Day/Week/Month period high/low sweep sources, independent of the
+// Fractal selector above. Own color/style scheme (below), reuses settings.bias for direction filtering.
+day_enabled_input               = input.bool(false, 'Day', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Day High/Low (PDH/PDL) as a Calendar Level sweep reference, independent of the Fractal selector.')
+cal_settings.day_enabled        := day_enabled_input
+week_enabled_input              = input.bool(false, 'Week', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Week High/Low (PWH/PWL) as a Calendar Level sweep reference, independent of the Fractal selector.')
+cal_settings.week_enabled       := week_enabled_input
+month_enabled_input             = input.bool(false, 'Month', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Month High/Low (PMH/PML) as a Calendar Level sweep reference, independent of the Fractal selector.')
+cal_settings.month_enabled      := month_enabled_input
+cal_sweep_show_input            = input.bool(true, 'Show Sweeps   ', group=group_calendar, inline='cal_sweep')
+cal_settings.sweep_show         := cal_sweep_show_input
+cal_settings.sweep_color        := input.color(color.rgb(0, 0, 0, 0), 'Color         ', inline='cal_sweep_color', group=group_calendar, active = cal_sweep_show_input)
+cal_settings.sweep_style        := input.string('Solid', '', options=['Solid', 'Dashed', 'Dotted'], inline='cal_sweep_color', group=group_calendar, active = cal_sweep_show_input)
+cal_settings.sweep_size         := input.int(1, '', options=[1, 2, 3, 4], inline='cal_sweep_color', group=group_calendar, active = cal_sweep_show_input)
+cal_settings.c2_color           := input.color(color.rgb(0, 0, 0), 'Label      ', inline='cal_c2', group=group_calendar)
+cal_settings.c2_size            := input.string(size.small, '', options=[size.tiny, size.small, size.normal, size.large], inline='cal_c2', group=group_calendar)
+cal_cisd_show_input             = input.bool(true, 'Show CISD     ', inline='cal_cisd', group=group_calendar)
+cal_settings.cisd_show          := cal_cisd_show_input
+cal_settings.cisd_bull_color    := input.color(color.rgb(41,98,255), 'Bull          ', inline='cal_cisd_color', group=group_calendar, active = cal_cisd_show_input)
+cal_settings.cisd_bear_color    := input.color(color.rgb(242,54,69), 'Bear', inline='cal_cisd_color', group=group_calendar, active = cal_cisd_show_input)
+cal_settings.cisd_width         := input.int(2, 'Width', options=[1, 2, 3, 4], inline='cal_cisd_style', group=group_calendar, active = cal_cisd_show_input)
+cal_settings.cisd_style         := input.string('Solid', 'Style', options=['Solid', 'Dashed', 'Dotted'], inline='cal_cisd_style', group=group_calendar, active = cal_cisd_show_input)
+cal_proj_show_input             = input.bool(false, 'Show Projections', group=group_calendar, inline='cal_proj')
+cal_settings.proj_show          := cal_proj_show_input
+cal_settings.proj_color         := input.color(color.rgb(0,0,0,80), '', inline='cal_proj_style', group=group_calendar, active = cal_proj_show_input)
+cal_settings.proj_style         := input.string('Solid', '', options=['Solid', 'Dashed', 'Dotted'], inline='cal_proj_style', group=group_calendar, active = cal_proj_show_input)
+cal_settings.proj_width         := input.int(1, 'Width', inline='cal_proj_style', group=group_calendar, active = cal_proj_show_input)
 
 sweep_show_input                = input.bool(true, 'Show Sweeps   ', group=group_sweep, inline='sweep')
 settings.sweep_show             := sweep_show_input

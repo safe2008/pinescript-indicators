@@ -5,9 +5,9 @@ Implements the Calendar Level concept defined in [`CONTEXT.md`](./CONTEXT.md): D
 Key finding from investigating the current code before writing this list: `Setup` creation is tied directly to `candleSet.candles` (the projected HTF candle series via `prev_htf` / `isNewHTFCandle`, see `fractal-model.pine:1262-1300`). Calendar Levels have no candle series (no candle-projection panel), so detection needs its own lightweight period-high/low tracker feeding the same downstream `Setup` / C2 / CISD / projection machinery — not a parameter swap on existing functions.
 
 ## 1. Settings scaffolding
-- [ ] New `group_calendar` settings group (alongside `group_general`, `group_htf` at `:273-277`)
-- [ ] 3 toggles: Day / Week / Month (High + Low bundled per period)
-- [ ] Own color/style inputs for Calendar Level sweep/C2/CISD/projection drawing — distinct from `htf.settings.*`
+- [x] New `group_calendar` settings group (alongside `group_general`, `group_htf` at `:273-277`)
+- [x] 3 toggles: Day / Week / Month (High + Low bundled per period)
+- [x] Own color/style inputs for Calendar Level sweep/C2/CISD/projection drawing — distinct from `htf.settings.*`
 - [ ] Reuse existing `settings.bias` (`:287`) — no new bias input
 
 ## 2. Data model

@@ -274,13 +274,6 @@ type CalendarSource
     float prior_low
     int prior_high_idx         // bar index where prior_high occurred (Task 4: sweep line left anchor)
     int prior_low_idx          // bar index where prior_low occurred
-    int last_period_time       // previous bar's time(period) value, for manual rollover detection —
-                                // NOT ta.change(): UpdatePeriod runs 3x/bar (once per source, from the
-                                // shared for-source-in-cal_sources loop), and ta.change() keeps its
-                                // state per call SITE, not per argument value, so a single ta.change()
-                                // call site hit with 3 different sources' time(period) values in the
-                                // same bar would cross-contaminate their "did it change" results
-                                // (Day's call would see Week's prior value as its own, etc.)
     // Setup tracking state — mirrors CandleSet (above), minus candles/trace
     array<Sweep> sweeps
     array<Setup> setups        // completed setups for history
@@ -2101,27 +2094,28 @@ method Update(CandleSet candleSet) =>
     candleSet
 
 // Calendar Level period tracking (Task 3) — rolls current-period H/L into prior-period H/L on
-// day/week/month rollover. Originally used ta.change(time(tf)) (the Fractal HTF track's
-// isNewHTFCandle convention, :2970) instead of request.security, per the existing repo
-// convention. Task 12 fix: switched to manual previous-value tracking (source.last_period_time)
-// instead — this method is called 3x/bar from the shared `for source in cal_sources` loop
-// (once per Day/Week/Month source), and ta.* functions key their internal state by CALL SITE,
-// not by argument value. A single ta.change() call site hit 3 times in the same bar with 3
-// different sources' time(period) — "D", then "W", then "M" — would have each call clobber the
-// next one's "previous value" state, so e.g. Week's rollover check could see Day's prior
-// timestamp instead of its own. Manual tracking keeps each source's state on its own object,
-// independent of call order, and also resolves the "ta.change in a conditional scope" compiler
-// warning this had, since there's no ta.* call left in this method's reachable path at all.
+// day/week/month rollover, using the same ta.change(time(tf)) convention as the Fractal HTF
+// track's isNewHTFCandle (:2988), not request.security.
+// isNewPeriod is now passed in (Task 12 fix, see comment at the call site in Main Execution)
+// rather than computed here: this method is called 3x/bar from the shared
+// `for source in cal_sources` loop (once per Day/Week/Month source), and ta.* functions key
+// their internal state by CALL SITE, not by argument value — a ta.change(time(source.period))
+// call living inside this method would be hit 3 times per bar with 3 different arguments ("D",
+// then "W", then "M") from the SAME call site, clobbering each other's "previous value" state
+// (e.g. Week's rollover check could see Day's prior timestamp instead of its own), so isNewPeriod
+// would never reliably fire and prior_high/prior_low would stay na forever. An earlier version of
+// this fix tried tracking each source's own previous timestamp manually instead of using
+// ta.change at all; that traced out as logically correct but was hard to fully verify without a
+// compiler, so it was replaced with this — three separate, textually distinct, unconditional
+// ta.change() calls (one per period) computed once in Main Execution and passed in here — which
+// mirrors the proven-working isNewHTFCandle pattern exactly instead of introducing new logic.
 // Prior-period H/L is the swept reference — Calendar High/Low, labeled PDH/PDL, PWH/PWL,
 // PMH/PML on chart (CONTEXT.md). Only touches sources with .enabled true (Task 1 toggle).
 // Tracks bar indices alongside the values (like Candle.h_idx/l_idx) — Task 4 sweep detection
 // uses prior_high_idx/prior_low_idx as the sweep line's left anchor (no candle series to read
 // prev_htf.h_idx/l_idx from, per the design note at the top of Tasks.md).
-method UpdatePeriod(CalendarSource source) =>
+method UpdatePeriod(CalendarSource source, bool isNewPeriod) =>
     if source.enabled
-        int cur_period_time = time(source.period)
-        bool isNewPeriod = not na(source.last_period_time) and cur_period_time != source.last_period_time
-        source.last_period_time := cur_period_time
         if isNewPeriod or na(source.cur_high)
             // Rollover — or the very first bar, where na(cur_high) is true and there is no
             // prior period yet, so prior_high/prior_low simply stay na until one exists.
@@ -3067,10 +3061,23 @@ if valid_htf
 
 // Calendar Level period tracking + sweep detection - independent of the Fractal selector /
 // valid_htf gate above, runs every tick for each enabled source (Day/Week/Month).
+// Task 12 fix: ta.change() must run unconditionally from a single, fixed call site to track
+// state correctly. Looping UpdatePeriod() over the 3 sources and calling ta.change() from
+// inside it (keyed on source.period) meant one shared call site got hit 3x/bar with 3 different
+// arguments ("D" then "W" then "M"), clobbering each source's rollover state (see UpdatePeriod's
+// comment) — prior_high/prior_low never populated, so the Calendar Level lines never appeared.
+// Fix: compute each period's ta.change() here, once, from its own textually distinct call site
+// (mirrors the proven isNewHTFCandle pattern, :2988), then pair with cal_sources by index
+// (built in Day/Week/Month order, Task 2) and pass the result into UpdatePeriod.
+bool isNewDayPeriod = ta.change(time("D")) > 0
+bool isNewWeekPeriod = ta.change(time("W")) > 0
+bool isNewMonthPeriod = ta.change(time("M")) > 0
+array<bool> cal_new_period = array.from(isNewDayPeriod, isNewWeekPeriod, isNewMonthPeriod)
 // UpdatePeriod must run before DetectSweep so a rollover bar's new prior_high/prior_low are
 // in place before that same bar's breach check.
-for source in cal_sources
-    source.UpdatePeriod()
+for i = 0 to cal_sources.size() - 1
+    CalendarSource source = cal_sources.get(i)
+    source.UpdatePeriod(cal_new_period.get(i))
     source.DetectSweep()
 
 // Drawing (only on last bar)

@@ -2096,17 +2096,27 @@ method UpdatePeriod(CalendarSource source) =>
                 source.cur_low_idx := bar_index
     source
 
-// Calendar Level sweep detection (Task 4) — ported from the Fractal HTF bearish/bullish
-// tracking blocks in Monitor() (wick-through-then-close-back-through: high/low breaches
-// source.prior_high/prior_low, then close puts price back inside the level). Runs off the
-// Task 3 period tracker instead of prev_htf/candleSet.candles.first() — Calendar Levels have
-// no candle series. Detection always runs when enabled (matches "Live sweep detection -
-// ALWAYS runs" in Monitor() above); cal_settings.sweep_show only gates drawing (Task 7), same
-// as settings.sweep_show does for the Fractal HTF path.
-// Setup creation only: same field shape as the Fractal HTF path (sweep_price, sweep_bar_idx,
-// is_bullish, ...) so FindCISDLevel/IC*/TrySetEntryZoneC3/C4 (Tasks 5-6) don't need to branch
-// on source type. CISD initialization, liquidity/SMT data, and continued per-bar tracking of
-// an already-live setup are intentionally NOT ported yet (Task 5).
+// Calendar Level sweep detection + CISD confirmation (Tasks 4-5) — ported from the Fractal
+// HTF bearish/bullish tracking blocks in Monitor(). Task 4 covers "wick-through" detection and
+// Setup creation; Task 5 adds CISD-extreme seeding at creation plus per-bar continuation
+// (tracked_extreme updates, FindCISDLevel recalculation, cisd_end_idx/cisd_triggered, IC-CISD)
+// — mirroring Monitor()'s "not is_post_c2" (C2 phase) branch only. Calendar setups don't go
+// through the HTF-candle-cadence post-C2 cascade (that logic replaces old-C2-becomes-new-C1
+// using candleSet.candles.get(1) — no candle series to cascade against here; see the design
+// note at the top of Tasks.md). CISD confirmation (cisd_triggered) already fully happens
+// within the C2-phase logic on the Fractal path too, so nothing is lost by not porting it.
+// Runs off the Task 3 period tracker instead of prev_htf/candleSet.candles.first(). Detection
+// and continuation always run when enabled (matches "Live sweep detection - ALWAYS runs" in
+// Monitor() above); cal_settings.sweep_show only gates drawing (Task 7), same as
+// settings.sweep_show does for the Fractal HTF path.
+// Rollover-persistence: setup.sweep_price/tracked_extreme are captured once at creation, then
+// only ever updated incrementally by this method from the raw high/low — never re-derived from
+// source.prior_high/prior_low or source.cur_high/cur_low after creation. A later period
+// rollover overwrites those source fields, but an in-progress setup keeps tracking its own
+// captured state, so confirmation is unaffected by rollover happening mid-tracking.
+// Deferred to Task 6 (projection/entry zone): proj_anchor_0/1, proj_start_idx/end_idx,
+// TrySetEntryZoneC3, liq_end_time. Deferred to Task 8 (alerts): all alert() calls (including
+// the one inside ICUpdate, which still hardcodes htf.settings.htf — flagged, not fixed here).
 method DetectSweep(CalendarSource source) =>
     if source.enabled and not na(source.prior_high) and not na(source.prior_low)
         bool high_breached = high > source.prior_high
@@ -2127,10 +2137,46 @@ method DetectSweep(CalendarSource source) =>
                 setup.c2_x := bar_index
                 setup.c2_y := high
                 setup.htf_count := 1
+                // Seed the CISD-tracking extreme from the current period's running high — Task 3's
+                // UpdatePeriod already folds this bar's high into cur_high before DetectSweep runs,
+                // so cur_high here equals "highest high since sweep" exactly once, at creation.
+                setup.tracked_extreme := source.cur_high
+                setup.extreme_bar_idx := source.cur_high_idx
+                [cisd_price, cisd_idx] = FindCISDLevel(setup.extreme_bar_idx, 1)
+                if not na(cisd_price)
+                    setup.cisd_level := cisd_price
+                    setup.cisd_start_idx := cisd_idx
+                    setup.has_cisd := true
                 if high_sweep_confirmed
                     setup.is_confirmed := true
                 source.live_bearish := setup
                 source.has_live_bearish := true
+        else
+            // Bearish tracking exists — update extreme and check CISD (Task 5)
+            Setup setup = source.live_bearish
+            setup.is_confirmed := close < setup.sweep_price
+
+            if high > setup.tracked_extreme
+                setup.tracked_extreme := high
+                setup.extreme_bar_idx := bar_index
+                setup.c2_x := bar_index
+                setup.c2_y := high
+                [new_cisd_price, new_cisd_idx] = FindCISDLevel(bar_index, 1)
+                if not na(new_cisd_price)
+                    setup.cisd_level := new_cisd_price
+                    setup.cisd_start_idx := new_cisd_idx
+                    setup.has_cisd := true
+                    setup.cisd_triggered := false  // Reset trigger on new extreme
+                    setup.cisd_end_idx := na
+                    ResetICCisd(setup)  // IC must wait for new main CISD confirm
+
+            // Body break = CISD line end. Confirmation waits until sweep is also back in.
+            if setup.has_cisd and na(setup.cisd_end_idx) and close < setup.cisd_level
+                setup.cisd_end_idx := bar_index
+            if setup.is_confirmed and setup.has_cisd and not setup.cisd_triggered and not na(setup.cisd_end_idx)
+                setup.cisd_triggered := true
+                // Projection anchors / TrySetEntryZoneC3 / CISD-trigger alert: Task 6 / Task 8
+            ICUpdate(setup)
 
         // ===== BULLISH TRACKING (when low is wicked) =====
         if not source.has_live_bullish
@@ -2145,10 +2191,41 @@ method DetectSweep(CalendarSource source) =>
                 setup.c2_x := bar_index
                 setup.c2_y := low
                 setup.htf_count := 1
+                setup.tracked_extreme := source.cur_low
+                setup.extreme_bar_idx := source.cur_low_idx
+                [cisd_price, cisd_idx] = FindCISDLevel(setup.extreme_bar_idx, -1)
+                if not na(cisd_price)
+                    setup.cisd_level := cisd_price
+                    setup.cisd_start_idx := cisd_idx
+                    setup.has_cisd := true
                 if low_sweep_confirmed
                     setup.is_confirmed := true
                 source.live_bullish := setup
                 source.has_live_bullish := true
+        else
+            // Bullish tracking exists — update extreme and check CISD (Task 5)
+            Setup setup = source.live_bullish
+            setup.is_confirmed := close > setup.sweep_price
+
+            if low < setup.tracked_extreme
+                setup.tracked_extreme := low
+                setup.extreme_bar_idx := bar_index
+                setup.c2_x := bar_index
+                setup.c2_y := low
+                [new_cisd_price, new_cisd_idx] = FindCISDLevel(bar_index, -1)
+                if not na(new_cisd_price)
+                    setup.cisd_level := new_cisd_price
+                    setup.cisd_start_idx := new_cisd_idx
+                    setup.has_cisd := true
+                    setup.cisd_triggered := false
+                    setup.cisd_end_idx := na
+                    ResetICCisd(setup)
+
+            if setup.has_cisd and na(setup.cisd_end_idx) and close > setup.cisd_level
+                setup.cisd_end_idx := bar_index
+            if setup.is_confirmed and setup.has_cisd and not setup.cisd_triggered and not na(setup.cisd_end_idx)
+                setup.cisd_triggered := true
+            ICUpdate(setup)
     source
 
 // Check CISD trigger for confirmed setups

@@ -23,9 +23,9 @@ Key finding from investigating the current code before writing this list: `Setup
 - [x] On sweep: `Setup.new()`, populate `sweep_price`, `sweep_bar_idx`, `is_bullish` — same shape as existing setups so downstream code doesn't need to branch on source type
 
 ## 5. CISD confirmation — reuse
-- [ ] Wire new setups into `FindCISDLevel` (`:893`) and the `IC*` functions (`:930-1011`, already parameterized on `Setup` — no changes expected)
-- [ ] Verify `ICTrackExtreme`/`ICUpdate`'s CISD-tracking-extreme initialization (`:1277-1287`) doesn't implicitly depend on `candleSet.candles` beyond what's ported in step 4
-- [ ] Rollover-persistence: an in-progress (swept, unconfirmed) setup keeps tracking its original swept level to confirmation, even after the calendar period rolls over — only *future* sweeps use the new period's H/L
+- [x] Wire new setups into `FindCISDLevel` (`:893`) and the `IC*` functions (`:930-1011`, already parameterized on `Setup` — no changes expected)
+- [x] Verify `ICTrackExtreme`/`ICUpdate`'s CISD-tracking-extreme initialization (`:1277-1287`) doesn't implicitly depend on `candleSet.candles` beyond what's ported in step 4
+- [x] Rollover-persistence: an in-progress (swept, unconfirmed) setup keeps tracking its original swept level to confirmation, even after the calendar period rolls over — only *future* sweeps use the new period's H/L
 
 ## 6. Projection + position sizer — reuse
 - [ ] Confirm `TrySetEntryZoneC3`/`TrySetEntryZoneC4` (`:838`, `:851`) work unmodified against Calendar-sourced `Setup`s

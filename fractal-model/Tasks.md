@@ -19,8 +19,8 @@ Key finding from investigating the current code before writing this list: `Setup
 - [x] This prior-period H/L is the swept reference (PDH/PDL/PWH/PWL/PMH/PML)
 
 ## 4. Sweep detection (new, per Calendar source)
-- [ ] Port the wick-through-then-close-back-through logic from `:1262-1300` (and its bullish mirror ~`:1500`) to run off the tracked prior-period H/L instead of `prev_htf`/`candleSet.candles.first()`
-- [ ] On sweep: `Setup.new()`, populate `sweep_price`, `sweep_bar_idx`, `is_bullish` — same shape as existing setups so downstream code doesn't need to branch on source type
+- [x] Port the wick-through-then-close-back-through logic from `:1262-1300` (and its bullish mirror ~`:1500`) to run off the tracked prior-period H/L instead of `prev_htf`/`candleSet.candles.first()`
+- [x] On sweep: `Setup.new()`, populate `sweep_price`, `sweep_bar_idx`, `is_bullish` — same shape as existing setups so downstream code doesn't need to branch on source type
 
 ## 5. CISD confirmation — reuse
 - [ ] Wire new setups into `FindCISDLevel` (`:893`) and the `IC*` functions (`:930-1011`, already parameterized on `Setup` — no changes expected)

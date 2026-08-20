@@ -259,10 +259,14 @@ type CalendarSource
     // Current (in-progress) period high/low — updated every bar until rollover (Task 3)
     float cur_high
     float cur_low
+    int cur_high_idx           // bar index where cur_high occurred (running, like Candle.h_idx)
+    int cur_low_idx            // bar index where cur_low occurred
     // Prior (completed) period high/low — the swept reference: Calendar High/Low,
     // labeled PDH/PDL, PWH/PWL, PMH/PML on chart (CONTEXT.md)
     float prior_high
     float prior_low
+    int prior_high_idx         // bar index where prior_high occurred (Task 4: sweep line left anchor)
+    int prior_low_idx          // bar index where prior_low occurred
     // Setup tracking state — mirrors CandleSet (above), minus candles/trace
     array<Sweep> sweeps
     array<Setup> setups        // completed setups for history
@@ -2066,6 +2070,9 @@ method Update(CandleSet candleSet) =>
 // track's isNewHTFCandle (:2585), not request.security, per the existing repo convention.
 // Prior-period H/L is the swept reference — Calendar High/Low, labeled PDH/PDL, PWH/PWL,
 // PMH/PML on chart (CONTEXT.md). Only touches sources with .enabled true (Task 1 toggle).
+// Tracks bar indices alongside the values (like Candle.h_idx/l_idx) — Task 4 sweep detection
+// uses prior_high_idx/prior_low_idx as the sweep line's left anchor (no candle series to read
+// prev_htf.h_idx/l_idx from, per the design note at the top of Tasks.md).
 method UpdatePeriod(CalendarSource source) =>
     if source.enabled
         bool isNewPeriod = ta.change(time(source.period)) > 0
@@ -2074,11 +2081,74 @@ method UpdatePeriod(CalendarSource source) =>
             // prior period yet, so prior_high/prior_low simply stay na until one exists.
             source.prior_high := source.cur_high
             source.prior_low := source.cur_low
+            source.prior_high_idx := source.cur_high_idx
+            source.prior_low_idx := source.cur_low_idx
             source.cur_high := high
             source.cur_low := low
+            source.cur_high_idx := bar_index
+            source.cur_low_idx := bar_index
         else
-            source.cur_high := math.max(source.cur_high, high)
-            source.cur_low := math.min(source.cur_low, low)
+            if high > source.cur_high
+                source.cur_high := high
+                source.cur_high_idx := bar_index
+            if low < source.cur_low
+                source.cur_low := low
+                source.cur_low_idx := bar_index
+    source
+
+// Calendar Level sweep detection (Task 4) — ported from the Fractal HTF bearish/bullish
+// tracking blocks in Monitor() (wick-through-then-close-back-through: high/low breaches
+// source.prior_high/prior_low, then close puts price back inside the level). Runs off the
+// Task 3 period tracker instead of prev_htf/candleSet.candles.first() — Calendar Levels have
+// no candle series. Detection always runs when enabled (matches "Live sweep detection -
+// ALWAYS runs" in Monitor() above); cal_settings.sweep_show only gates drawing (Task 7), same
+// as settings.sweep_show does for the Fractal HTF path.
+// Setup creation only: same field shape as the Fractal HTF path (sweep_price, sweep_bar_idx,
+// is_bullish, ...) so FindCISDLevel/IC*/TrySetEntryZoneC3/C4 (Tasks 5-6) don't need to branch
+// on source type. CISD initialization, liquidity/SMT data, and continued per-bar tracking of
+// an already-live setup are intentionally NOT ported yet (Task 5).
+method DetectSweep(CalendarSource source) =>
+    if source.enabled and not na(source.prior_high) and not na(source.prior_low)
+        bool high_breached = high > source.prior_high
+        bool low_breached = low < source.prior_low
+        bool high_sweep_confirmed = high_breached and close < source.prior_high
+        bool low_sweep_confirmed = low_breached and close > source.prior_low
+
+        // ===== BEARISH TRACKING (when high is wicked) =====
+        if not source.has_live_bearish
+            if high_breached
+                Setup setup = Setup.new()
+                setup.is_bullish := false
+                setup.is_confirmed := false
+                setup.sweep_price := source.prior_high
+                setup.sweep_ltf_idx := source.prior_high_idx
+                setup.sweep_bar_idx := bar_index
+                setup.ltf_end_idx := bar_index + 50
+                setup.c2_x := bar_index
+                setup.c2_y := high
+                setup.htf_count := 1
+                if high_sweep_confirmed
+                    setup.is_confirmed := true
+                source.live_bearish := setup
+                source.has_live_bearish := true
+
+        // ===== BULLISH TRACKING (when low is wicked) =====
+        if not source.has_live_bullish
+            if low_breached
+                Setup setup = Setup.new()
+                setup.is_bullish := true
+                setup.is_confirmed := false
+                setup.sweep_price := source.prior_low
+                setup.sweep_ltf_idx := source.prior_low_idx
+                setup.sweep_bar_idx := bar_index
+                setup.ltf_end_idx := bar_index + 50
+                setup.c2_x := bar_index
+                setup.c2_y := low
+                setup.htf_count := 1
+                if low_sweep_confirmed
+                    setup.is_confirmed := true
+                source.live_bullish := setup
+                source.has_live_bullish := true
     source
 
 // Check CISD trigger for confirmed setups
@@ -2686,10 +2756,13 @@ if valid_htf
     // HTF candle updates - always run every tick
     htf.Update()
 
-// Calendar Level period tracking - independent of the Fractal selector / valid_htf gate above,
-// runs every tick for each enabled source (Day/Week/Month)
+// Calendar Level period tracking + sweep detection - independent of the Fractal selector /
+// valid_htf gate above, runs every tick for each enabled source (Day/Week/Month).
+// UpdatePeriod must run before DetectSweep so a rollover bar's new prior_high/prior_low are
+// in place before that same bar's breach check.
 for source in cal_sources
     source.UpdatePeriod()
+    source.DetectSweep()
 
 // Drawing (only on last bar)
 if barstate.islast or barstate.isrealtime

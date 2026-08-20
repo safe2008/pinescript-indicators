@@ -32,9 +32,9 @@ Key finding from investigating the current code before writing this list: `Setup
 - [x] Reuse existing global R:R/projection-ratio inputs — no new per-period copies
 
 ## 7. Drawing
-- [ ] Level line (PDH/PDL/PWH/PWL/PMH/PML label) drawn from prior-period H/L, using new Calendar color group
-- [ ] Sweep line, C2 label, CISD line, projection lines — reuse existing draw functions, parameterized by the new color inputs instead of `htf.settings.*`
-- [ ] No candle-projection panel — skip anything resembling `htf.candles` rendering for these sources
+- [x] Level line (PDH/PDL/PWH/PWL/PMH/PML label) drawn from prior-period H/L, using new Calendar color group
+- [x] Sweep line, C2 label, CISD line, projection lines — reuse existing draw functions, parameterized by the new color inputs instead of `htf.settings.*`
+- [x] No candle-projection panel — skip anything resembling `htf.candles` rendering for these sources
 
 ## 8. Alerts
 - [ ] New `alertcondition()`s per period/direction for sweep + CISD confirmation (mirror pattern at `:1061`, `:1491`, `:1726`), gated on `settings.bias` same as existing alerts

@@ -140,6 +140,13 @@ type CalendarSettings
     bool day_enabled
     bool week_enabled
     bool month_enabled
+    // Level line settings (PDH/PDL/PWH/PWL/PMH/PML) — mirrors htf.settings.hl_* (Task 7):
+    // the Fractal HTF track keeps its H/L reference lines on a dedicated set of inputs
+    // separate from its sweep-line color, so Calendar Levels do too.
+    bool level_show
+    color level_color
+    string level_style
+    int level_width
     // Sweep settings
     bool sweep_show
     color sweep_color
@@ -685,6 +692,11 @@ cal_week.enabled                := week_enabled_input
 month_enabled_input             = input.bool(false, 'Month', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Month High/Low (PMH/PML) as a Calendar Level sweep reference, independent of the Fractal selector.')
 cal_settings.month_enabled      := month_enabled_input
 cal_month.enabled               := month_enabled_input
+cal_level_show_input            = input.bool(true, 'Show Levels   ', group=group_calendar, inline='cal_level')
+cal_settings.level_show          := cal_level_show_input
+cal_settings.level_color        := input.color(color.rgb(120, 123, 134), '', inline='cal_level_color', group=group_calendar, active = cal_level_show_input)
+cal_settings.level_style        := input.string('Solid', '', options=['Solid', 'Dashed', 'Dotted'], inline='cal_level_color', group=group_calendar, active = cal_level_show_input)
+cal_settings.level_width        := input.int(1, 'Width', options=[1, 2, 3, 4], inline='cal_level_color', group=group_calendar, active = cal_level_show_input)
 cal_sweep_show_input            = input.bool(true, 'Show Sweeps   ', group=group_calendar, inline='cal_sweep')
 cal_settings.sweep_show         := cal_sweep_show_input
 cal_settings.sweep_color        := input.color(color.rgb(0, 0, 0, 0), 'Color         ', inline='cal_sweep_color', group=group_calendar, active = cal_sweep_show_input)
@@ -2797,6 +2809,81 @@ method DrawSetups(CandleSet candleSet) =>
         
     candleSet
 
+// Calendar Level drawing (Task 7) — reuses the same LineStyle()/LabelSize() helpers and the
+// same visual shapes as DrawVTHLLines/DrawSetups above, parameterized with cal_settings.*
+// instead of htf.settings.*/settings.*. No candle-projection panel: Calendar Levels have no
+// candle series (CONTEXT.md), so only the "on-chart" layers are mirrored — the HTF
+// candle-panel sub-blocks in DrawSetups (the ones that loop candleSet.candles for
+// wick_x/candle_right positions) are skipped entirely, not just re-parameterized, since there
+// is no candle array to look positions up in.
+// Reuses global settings.bias (Task 1) for the bullish/bearish filter, and global
+// settings.sweep_history/proj_deviations/proj_label_show/proj_label_size (Task 6's "reuse
+// global, no per-period copies" convention) — sweep_history also defensively caps how many
+// confirmed setups get drawn per source, since source.setups isn't trimmed yet (Task 9).
+method DrawCalendarSource(CalendarSource source) =>
+    if source.enabled
+        // ==== LEVEL LINE — PDH/PDL, PWH/PWL, PMH/PML, drawn from prior_high/prior_low (Task 3) ====
+        if cal_settings.level_show
+            level_line_style = LineStyle(cal_settings.level_style)
+            string hi_label = source.period == "D" ? "PDH" : source.period == "W" ? "PWH" : "PMH"
+            string lo_label = source.period == "D" ? "PDL" : source.period == "W" ? "PWL" : "PML"
+            if not na(source.prior_high)
+                bin.lines.push(line.new(source.prior_high_idx, source.prior_high, bar_index, source.prior_high, extend = extend.right, color = cal_settings.level_color, style = level_line_style, width = cal_settings.level_width))
+                bin.labels.push(label.new(bar_index, source.prior_high, hi_label, color = color_transparent, textcolor = cal_settings.level_color, style = label.style_label_left, size = size.small))
+            if not na(source.prior_low)
+                bin.lines.push(line.new(source.prior_low_idx, source.prior_low, bar_index, source.prior_low, extend = extend.right, color = cal_settings.level_color, style = level_line_style, width = cal_settings.level_width))
+                bin.labels.push(label.new(bar_index, source.prior_low, lo_label, color = color_transparent, textcolor = cal_settings.level_color, style = label.style_label_left, size = size.small))
+
+        sweep_line_style = LineStyle(cal_settings.sweep_style)
+        cisd_line_style = LineStyle(cal_settings.cisd_style)
+        proj_line_style = LineStyle(cal_settings.proj_style)
+
+        // ==== LIVE (IN-PROGRESS) SETUPS — sweep line always while tracking; C2 once the sweep
+        // closes back through (the "reversal candidate," CONTEXT.md); CISD once a level exists ====
+        for is_bull in array.from(false, true)
+            bool bias_ok = settings.bias == 'Neutral' or (settings.bias == 'Bullish' and is_bull) or (settings.bias == 'Bearish' and not is_bull)
+            if bias_ok
+                bool has_live = is_bull ? source.has_live_bullish : source.has_live_bearish
+                if has_live
+                    Setup setup = is_bull ? source.live_bullish : source.live_bearish
+                    if cal_settings.sweep_show
+                        bin.lines.push(line.new(setup.sweep_ltf_idx, setup.sweep_price, bar_index, setup.sweep_price, color = cal_settings.sweep_color, style = sweep_line_style, width = cal_settings.sweep_size))
+                    if setup.is_confirmed
+                        lbl_style_live = is_bull ? label.style_label_up : label.style_label_down
+                        bin.labels.push(label.new(setup.c2_x, setup.c2_y, "C2", color = color_transparent, textcolor = cal_settings.c2_color, style = lbl_style_live, size = cal_settings.c2_size))
+                    if cal_settings.cisd_show and setup.has_cisd
+                        cisd_color_live = is_bull ? cal_settings.cisd_bull_color : cal_settings.cisd_bear_color
+                        int cisd_end_live = na(setup.cisd_end_idx) ? bar_index : setup.cisd_end_idx + 1
+                        bin.lines.push(line.new(setup.cisd_start_idx, setup.cisd_level, cisd_end_live, setup.cisd_level, color = cisd_color_live, style = cisd_line_style, width = cal_settings.cisd_width))
+
+        // ==== CONFIRMED (HISTORICAL) SETUPS — sweep locked at confirmation (Task 6's
+        // ltf_end_idx), C2 label, CISD line, projection lines. Capped at settings.sweep_history
+        // per source, defensively — see this task's report for the object-budget assessment. ====
+        if source.setups.size() > 0
+            int drawn = 0
+            for setup in source.setups
+                if drawn >= settings.sweep_history
+                    break
+                bool bias_ok_h = settings.bias == 'Neutral' or (settings.bias == 'Bullish' and setup.is_bullish) or (settings.bias == 'Bearish' and not setup.is_bullish)
+                if bias_ok_h
+                    drawn := drawn + 1
+                    if cal_settings.sweep_show
+                        bin.lines.push(line.new(setup.sweep_ltf_idx, setup.sweep_price, setup.ltf_end_idx, setup.sweep_price, color = cal_settings.sweep_color, style = sweep_line_style, width = cal_settings.sweep_size))
+                    lbl_style_hist = setup.is_bullish ? label.style_label_up : label.style_label_down
+                    bin.labels.push(label.new(setup.c2_x, setup.c2_y, "C2", color = color_transparent, textcolor = cal_settings.c2_color, style = lbl_style_hist, size = cal_settings.c2_size))
+                    if cal_settings.cisd_show and setup.has_cisd
+                        cisd_color_hist = setup.is_bullish ? cal_settings.cisd_bull_color : cal_settings.cisd_bear_color
+                        bin.lines.push(line.new(setup.cisd_start_idx, setup.cisd_level, setup.cisd_end_idx + 1, setup.cisd_level, color = cisd_color_hist, style = cisd_line_style, width = cal_settings.cisd_width))
+                    if cal_settings.proj_show and not na(setup.proj_anchor_1) and not na(setup.proj_anchor_0)
+                        float proj_range = setup.proj_anchor_1 - setup.proj_anchor_0
+                        for dv = 0 to proj_deviations.size() - 1
+                            dev = proj_deviations.get(dv)
+                            float price = setup.is_bullish ? setup.proj_anchor_0 - (math.abs(proj_range) * dev) : setup.proj_anchor_0 + (proj_range * dev)
+                            bin.lines.push(line.new(setup.proj_start_idx, price, setup.proj_end_idx, price, color = cal_settings.proj_color, style = proj_line_style, width = cal_settings.proj_width))
+                            if settings.proj_label_show
+                                bin.labels.push(label.new(setup.proj_start_idx, price, str.tostring(dev), color = color_transparent, textcolor = cal_settings.proj_color, style = label.style_label_right, size = LabelSize(settings.proj_label_size)))
+    source
+
 method DrawAll(CandleSet candleSet, int offset) =>
     // Always calculate positions (needed for HTF sweep line drawing)
     candleSet.CalculatePositions(offset)
@@ -2917,3 +3004,6 @@ for source in cal_sources
 if barstate.islast or barstate.isrealtime
     if valid_htf
         htf.DrawAll(offset)
+    // Calendar Level drawing - independent of the Fractal selector / valid_htf gate above
+    for source in cal_sources
+        source.DrawCalendarSource()

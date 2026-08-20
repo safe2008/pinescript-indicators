@@ -381,9 +381,9 @@ alerts_enabled_input            = input.bool(true, 'Alerts?', group=group_genera
 settings.alerts_enabled         := alerts_enabled_input
 settings.sweep_history          := input.int(10, 'History        ', minval=0, group=group_general, inline='history')
 settings.sweep_visible_only     := input.bool(true, '', tooltip='Number of historical setups to show:\n\n☑ ON: Setups on visible HTF candles always shown. This count adds older setups that scrolled away.\n\n☐ OFF: Only show this many setups total.', inline='history', group=group_general)
-settings.fractal_mode           := input.string('Automatic','Fractal', options=['Automatic', 'Quarterly', 'Custom', '1s-1m', '15s-5m', '1m-15m', '3m-30m', '5m-1H', '15m-4H', '1H-1D', '4H-1W', '1D-1M'], group=group_general, tooltip='Automatic: Standard multi-timeframe alignment.\nQuarterly: Based on ICT Quarterly Theory cycles (1m→22m, 3m/5m→90m, 15m/30m→6H).')
-settings.custom_ltf             := input.timeframe('5', 'Custom Fractal  ', inline='custom_tf', group=group_general)
-custom_htf_input                = input.timeframe('60','-', inline='custom_tf', group=group_general)
+settings.fractal_mode           := input.string('Custom','Fractal', options=['Automatic', 'Quarterly', 'Custom', '1s-1m', '15s-5m', '1m-15m', '3m-30m', '5m-1H', '15m-4H', '1H-1D', '4H-1W', '1D-1M'], group=group_general, tooltip='Automatic: Standard multi-timeframe alignment.\nQuarterly: Based on ICT Quarterly Theory cycles (1m→22m, 3m/5m→90m, 15m/30m→6H).')
+settings.custom_ltf             := input.timeframe('15', 'Custom Fractal  ', inline='custom_tf', group=group_general)
+custom_htf_input                = input.timeframe('420','-', inline='custom_tf', group=group_general)
 settings.bias                   := input.string('Neutral', 'Bias', options=['Neutral', 'Bullish', 'Bearish'], group=group_general, tooltip='Filter setups by direction:\n\nNeutral: Show both bullish and bearish setups.\nBullish: Only show bullish setups (low sweeps).\nBearish: Only show bearish setups (high sweeps).')
 
 getHigherTF() =>

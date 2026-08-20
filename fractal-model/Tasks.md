@@ -15,8 +15,8 @@ Key finding from investigating the current code before writing this list: `Setup
 - [x] 3 instances: Day, Week, Month — parallel to the single `var CandleSet htf` at `:251`
 
 ## 3. Period high/low tracking
-- [ ] Detect period rollover (new day/week/month) and roll "current period H/L" into "prior period H/L" (candidate: `request.security` on `"D"`/`"W"`/`"M"` with `[1]` offset, or manual `time("D")`-change detection — confirm it matches the timezone/session handling already used at `:328`)
-- [ ] This prior-period H/L is the swept reference (PDH/PDL/PWH/PWL/PMH/PML)
+- [x] Detect period rollover (new day/week/month) and roll "current period H/L" into "prior period H/L" (candidate: `request.security` on `"D"`/`"W"`/`"M"` with `[1]` offset, or manual `time("D")`-change detection — confirm it matches the timezone/session handling already used at `:328`)
+- [x] This prior-period H/L is the swept reference (PDH/PDL/PWH/PWL/PMH/PML)
 
 ## 4. Sweep detection (new, per Calendar source)
 - [ ] Port the wick-through-then-close-back-through logic from `:1262-1300` (and its bullish mirror ~`:1500`) to run off the tracked prior-period H/L instead of `prev_htf`/`candleSet.candles.first()`

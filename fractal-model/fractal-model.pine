@@ -335,6 +335,14 @@ cal_month.period := "M"
 cal_month.sweeps := cal_month_sweeps_1
 cal_month.setups := cal_month_setups_1
 
+// Shared list of the 3 sources — lets Task 3+ logic loop once instead of repeating
+// per-source blocks (built once via `var`, not reallocated every bar)
+var array<CalendarSource> cal_sources = array.new<CalendarSource>()
+if array.size(cal_sources) == 0
+    cal_sources.push(cal_day)
+    cal_sources.push(cal_week)
+    cal_sources.push(cal_month)
+
 // Initialize drawing bin
 var DrawingBin bin = DrawingBin.new(
     lines = array.new<line>(),
@@ -2053,6 +2061,26 @@ method Update(CandleSet candleSet) =>
             candleSet.trace.start_price := candle.o
     candleSet
 
+// Calendar Level period tracking (Task 3) — rolls current-period H/L into prior-period H/L on
+// day/week/month rollover. Uses the same ta.change(time(tf)) convention as the Fractal HTF
+// track's isNewHTFCandle (:2585), not request.security, per the existing repo convention.
+// Prior-period H/L is the swept reference — Calendar High/Low, labeled PDH/PDL, PWH/PWL,
+// PMH/PML on chart (CONTEXT.md). Only touches sources with .enabled true (Task 1 toggle).
+method UpdatePeriod(CalendarSource source) =>
+    if source.enabled
+        bool isNewPeriod = ta.change(time(source.period)) > 0
+        if isNewPeriod or na(source.cur_high)
+            // Rollover — or the very first bar, where na(cur_high) is true and there is no
+            // prior period yet, so prior_high/prior_low simply stay na until one exists.
+            source.prior_high := source.cur_high
+            source.prior_low := source.cur_low
+            source.cur_high := high
+            source.cur_low := low
+        else
+            source.cur_high := math.max(source.cur_high, high)
+            source.cur_low := math.min(source.cur_low, low)
+    source
+
 // Check CISD trigger for confirmed setups
 method CheckCISDTrigger(CandleSet candleSet) =>
     if candleSet.setups.size() > 0
@@ -2657,6 +2685,11 @@ if valid_htf
         htf.Monitor(isNewHTFCandle)
     // HTF candle updates - always run every tick
     htf.Update()
+
+// Calendar Level period tracking - independent of the Fractal selector / valid_htf gate above,
+// runs every tick for each enabled source (Day/Week/Month)
+for source in cal_sources
+    source.UpdatePeriod()
 
 // Drawing (only on last bar)
 if barstate.islast or barstate.isrealtime

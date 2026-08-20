@@ -37,7 +37,7 @@ Key finding from investigating the current code before writing this list: `Setup
 - [x] No candle-projection panel — skip anything resembling `htf.candles` rendering for these sources
 
 ## 8. Alerts
-- [ ] New `alertcondition()`s per period/direction for sweep + CISD confirmation (mirror pattern at `:1061`, `:1491`, `:1726`), gated on `settings.bias` same as existing alerts
+- [x] New `alertcondition()`s per period/direction for sweep + CISD confirmation (mirror pattern at `:1061`, `:1491`, `:1726`), gated on `settings.bias` same as existing alerts
 
 ## 9. Object-budget / history management
 - [ ] Apply the same trim-to-`max_setups` pattern (`:1912-1913`) independently per Calendar source

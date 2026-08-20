@@ -1143,7 +1143,10 @@ ICMarkTaken(Setup setup) =>
                         ic.taken := true
     setup
 
-ICUpdate(Setup setup) =>
+// tf_label: timeframe string for the IC-CISD alert message — candleSet.settings.htf for the
+// Fractal HTF path, source.period ("D"/"W"/"M") for Calendar (Task 8 fix: this used to
+// hardcode the global `htf` CandleSet, mislabeling Calendar-sourced IC-CISD alerts)
+ICUpdate(Setup setup, string tf_label) =>
     ICMarkTaken(setup)
     if not settings.ic_cisd_show
         setup
@@ -1194,7 +1197,7 @@ ICUpdate(Setup setup) =>
                         setup.ic_last_extreme := sw_px
                         ClearICPending(setup)
                         if settings.alerts_enabled and settings.ic_cisd_show and (settings.bias == "Neutral" or (setup.is_bullish and settings.bias == "Bullish") or (not setup.is_bullish and settings.bias == "Bearish"))
-                            alert(BuildAlertMessage(htf.settings.htf, setup.is_bullish, false, "IC-CISD"), alert.freq_once_per_bar)
+                            alert(BuildAlertMessage(tf_label, setup.is_bullish, false, "IC-CISD"), alert.freq_once_per_bar)
                     else
                         // No swing yet. Keep only if this close-through made a new extreme (it may be the swing; next bar is the right).
                         bool new_ext = setup.is_bullish ? (low < setup.ic_extreme) : (high > setup.ic_extreme)
@@ -1391,7 +1394,7 @@ method Monitor(CandleSet candleSet, bool isNewHTFCandleArg) =>
                     if not setup.ez_c4_invalid and not na(setup.c3_extreme) and not na(setup.ez_c4_left_time) and not na(setup.ez_c4_right_time) and time < setup.ez_c4_right_time and high > setup.c3_extreme
                         setup.ez_c4_invalid := true
                         setup.ez_c4_invalid_time := time_close
-                ICUpdate(setup)
+                ICUpdate(setup, candleSet.settings.htf)
 
         // ===== BEARISH TRACKING (when high is wicked) =====
         if not candleSet.has_live_bearish
@@ -1513,7 +1516,7 @@ method Monitor(CandleSet candleSet, bool isNewHTFCandleArg) =>
                 if not na(setup.liq_c0_price) and na(setup.liq_c0_mitigated_idx)
                     if low <= setup.liq_c0_price
                         setup.liq_c0_mitigated_idx := bar_index
-                ICUpdate(setup)
+                ICUpdate(setup, candleSet.settings.htf)
             else
                 // Post-C2 phase: check for invalidation, cancellation, or CISD trigger
                 bool setup_replaced = false
@@ -1626,7 +1629,7 @@ method Monitor(CandleSet candleSet, bool isNewHTFCandleArg) =>
                         if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bearish")
                             alert(BuildAlertMessage(candleSet.settings.htf, false, false, "Candle 2"), alert.freq_once_per_bar)
                 if not setup_replaced
-                    ICUpdate(setup)
+                    ICUpdate(setup, candleSet.settings.htf)
 
         // ===== BULLISH TRACKING (when low is wicked) =====
         if not candleSet.has_live_bullish
@@ -1748,7 +1751,7 @@ method Monitor(CandleSet candleSet, bool isNewHTFCandleArg) =>
                 if not na(setup.liq_c0_price) and na(setup.liq_c0_mitigated_idx)
                     if high >= setup.liq_c0_price
                         setup.liq_c0_mitigated_idx := bar_index
-                ICUpdate(setup)
+                ICUpdate(setup, candleSet.settings.htf)
             else
                 // Post-C2 phase: check for invalidation, cancellation, or CISD trigger
                 bool setup_replaced = false
@@ -1861,7 +1864,7 @@ method Monitor(CandleSet candleSet, bool isNewHTFCandleArg) =>
                         if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bullish")
                             alert(BuildAlertMessage(candleSet.settings.htf, true, false, "Candle 2"), alert.freq_once_per_bar)
                 if not setup_replaced
-                    ICUpdate(setup)
+                    ICUpdate(setup, candleSet.settings.htf)
 
     if isNewHTFCandle
         // Handle live setups on HTF candle close
@@ -2145,8 +2148,10 @@ method UpdatePeriod(CalendarSource source) =>
 // source.prior_high/prior_low or source.cur_high/cur_low after creation. A later period
 // rollover overwrites those source fields, but an in-progress setup keeps tracking its own
 // captured state, so confirmation is unaffected by rollover happening mid-tracking.
-// Deferred to Task 8 (alerts): all alert() calls (including the one inside ICUpdate, which
-// still hardcodes htf.settings.htf — flagged in Task 5's report, not fixed here).
+// Task 8 — Sweep and CISD-confirmation alerts fire here using BuildAlertMessage(source.period,
+// ...), gated on settings.alerts_enabled/settings.bias (reused globals, Task 1's convention).
+// ICUpdate now takes an explicit tf_label param instead of hardcoding the global htf CandleSet
+// (Task 5's flagged bug), so its own IC-CISD alert is correctly labeled per source too.
 method DetectSweep(CalendarSource source) =>
     if source.enabled and not na(source.prior_high) and not na(source.prior_low)
         bool high_breached = high > source.prior_high
@@ -2181,6 +2186,9 @@ method DetectSweep(CalendarSource source) =>
                     setup.is_confirmed := true
                 source.live_bearish := setup
                 source.has_live_bearish := true
+                // Sweep alert (Task 8)
+                if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bearish")
+                    alert(BuildAlertMessage(source.period, false, false, "Sweep"), alert.freq_once_per_bar)
         else
             // Bearish tracking exists — update extreme and check CISD (Task 5)
             Setup setup = source.live_bearish
@@ -2233,8 +2241,10 @@ method DetectSweep(CalendarSource source) =>
                 TrySetEntryZoneC4(setup, high, low, close, time, na)  // right_time na = still developing (EntryZoneRight)
                 source.setups.unshift(setup)
                 source.has_live_bearish := false
-                // CISD-trigger alert: Task 8
-            ICUpdate(setup)
+                // CISD-trigger alert (Task 8)
+                if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bearish")
+                    alert(BuildAlertMessage(source.period, false, false, "Candle 2"), alert.freq_once_per_bar)
+            ICUpdate(setup, source.period)
 
         // ===== BULLISH TRACKING (when low is wicked) =====
         if not source.has_live_bullish
@@ -2260,6 +2270,9 @@ method DetectSweep(CalendarSource source) =>
                     setup.is_confirmed := true
                 source.live_bullish := setup
                 source.has_live_bullish := true
+                // Sweep alert (Task 8)
+                if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bullish")
+                    alert(BuildAlertMessage(source.period, true, false, "Sweep"), alert.freq_once_per_bar)
         else
             // Bullish tracking exists — update extreme and check CISD (Task 5)
             Setup setup = source.live_bullish
@@ -2308,8 +2321,10 @@ method DetectSweep(CalendarSource source) =>
                 TrySetEntryZoneC4(setup, high, low, close, time, na)
                 source.setups.unshift(setup)
                 source.has_live_bullish := false
-                // CISD-trigger alert: Task 8
-            ICUpdate(setup)
+                // CISD-trigger alert (Task 8)
+                if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bullish")
+                    alert(BuildAlertMessage(source.period, true, false, "Candle 2"), alert.freq_once_per_bar)
+            ICUpdate(setup, source.period)
     source
 
 // Check CISD trigger for confirmed setups

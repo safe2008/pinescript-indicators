@@ -11,8 +11,8 @@ Key finding from investigating the current code before writing this list: `Setup
 - [ ] Reuse existing `settings.bias` (`:287`) — no new bias input
 
 ## 2. Data model
-- [ ] New lightweight type, e.g. `CalendarSource` (period label, current-period high/low, prior-period high/low, `Setup` tracking state) — deliberately *not* `CandleSet` (`:213`), which carries `candles`/`trace` fields Calendar Levels don't need
-- [ ] 3 instances: Day, Week, Month — parallel to the single `var CandleSet htf` at `:251`
+- [x] New lightweight type, e.g. `CalendarSource` (period label, current-period high/low, prior-period high/low, `Setup` tracking state) — deliberately *not* `CandleSet` (`:213`), which carries `candles`/`trace` fields Calendar Levels don't need
+- [x] 3 instances: Day, Week, Month — parallel to the single `var CandleSet htf` at `:251`
 
 ## 3. Period high/low tracking
 - [ ] Detect period rollover (new day/week/month) and roll "current period H/L" into "prior period H/L" (candidate: `request.security` on `"D"`/`"W"`/`"M"` with `[1]` offset, or manual `time("D")`-change detection — confirm it matches the timezone/session handling already used at `:328`)

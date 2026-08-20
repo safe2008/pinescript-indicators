@@ -248,6 +248,29 @@ type CandleSet
     bool has_live_bearish     // flag for bearish tracking active
     bool has_live_bullish     // flag for bullish tracking active
 
+// Calendar Level source — Day/Week/Month period high/low sweep reference, independent of
+// the Fractal selector. Deliberately NOT a CandleSet: no candle-projection panel, so no
+// candles/trace fields. Setup-tracking fields mirror CandleSet's so downstream Sweep → C2 →
+// CISD → projection code (FindCISDLevel, IC*, TrySetEntryZoneC3/C4) doesn't need to branch
+// on source type.
+type CalendarSource
+    string period             // Pine timeframe code identifying this source: "D" / "W" / "M"
+    bool enabled               // mirrors cal_settings.day_enabled / week_enabled / month_enabled for this period
+    // Current (in-progress) period high/low — updated every bar until rollover (Task 3)
+    float cur_high
+    float cur_low
+    // Prior (completed) period high/low — the swept reference: Calendar High/Low,
+    // labeled PDH/PDL, PWH/PWL, PMH/PML on chart (CONTEXT.md)
+    float prior_high
+    float prior_low
+    // Setup tracking state — mirrors CandleSet (above), minus candles/trace
+    array<Sweep> sweeps
+    array<Setup> setups        // completed setups for history
+    Setup live_bearish         // tracks when high is wicked (potential bearish setup)
+    Setup live_bullish         // tracks when low is wicked (potential bullish setup)
+    bool has_live_bearish      // flag for bearish tracking active
+    bool has_live_bullish      // flag for bullish tracking active
+
 // Drawing Bin - centralized storage for all drawing objects
 type DrawingBin
     array<line> lines
@@ -284,6 +307,33 @@ htf.trace := Trace.new()
 
 // Calendar Level settings — shared across the Day/Week/Month sources (later tasks)
 var CalendarSettings cal_settings = CalendarSettings.new()
+
+// Calendar Level sources — Day/Week/Month, parallel to the single `htf` CandleSet above.
+// Backing arrays go through their own `var` bindings (same reasoning as candles_1/sweeps_1/
+// setups_1 above) so the `.sweeps :=`/`.setups :=` re-assignment below re-links the same
+// stable array every bar instead of clearing history with a fresh array.new() each bar.
+// `enabled` is wired below, alongside the matching cal_settings.*_enabled input (Settings
+// Inputs section), so it reflects the input value from bar 0 instead of lagging a bar.
+var array<Sweep> cal_day_sweeps_1 = array.new<Sweep>()
+var array<Setup> cal_day_setups_1 = array.new<Setup>()
+var CalendarSource cal_day = CalendarSource.new()
+cal_day.period := "D"
+cal_day.sweeps := cal_day_sweeps_1
+cal_day.setups := cal_day_setups_1
+
+var array<Sweep> cal_week_sweeps_1 = array.new<Sweep>()
+var array<Setup> cal_week_setups_1 = array.new<Setup>()
+var CalendarSource cal_week = CalendarSource.new()
+cal_week.period := "W"
+cal_week.sweeps := cal_week_sweeps_1
+cal_week.setups := cal_week_setups_1
+
+var array<Sweep> cal_month_sweeps_1 = array.new<Sweep>()
+var array<Setup> cal_month_setups_1 = array.new<Setup>()
+var CalendarSource cal_month = CalendarSource.new()
+cal_month.period := "M"
+cal_month.sweeps := cal_month_sweeps_1
+cal_month.setups := cal_month_setups_1
 
 // Initialize drawing bin
 var DrawingBin bin = DrawingBin.new(
@@ -616,10 +666,13 @@ drawings_type                  = input.string('Both', 'Drawings Type', options=[
 // Fractal selector above. Own color/style scheme (below), reuses settings.bias for direction filtering.
 day_enabled_input               = input.bool(false, 'Day', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Day High/Low (PDH/PDL) as a Calendar Level sweep reference, independent of the Fractal selector.')
 cal_settings.day_enabled        := day_enabled_input
+cal_day.enabled                 := day_enabled_input
 week_enabled_input              = input.bool(false, 'Week', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Week High/Low (PWH/PWL) as a Calendar Level sweep reference, independent of the Fractal selector.')
 cal_settings.week_enabled       := week_enabled_input
+cal_week.enabled                := week_enabled_input
 month_enabled_input             = input.bool(false, 'Month', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Month High/Low (PMH/PML) as a Calendar Level sweep reference, independent of the Fractal selector.')
 cal_settings.month_enabled      := month_enabled_input
+cal_month.enabled               := month_enabled_input
 cal_sweep_show_input            = input.bool(true, 'Show Sweeps   ', group=group_calendar, inline='cal_sweep')
 cal_settings.sweep_show         := cal_sweep_show_input
 cal_settings.sweep_color        := input.color(color.rgb(0, 0, 0, 0), 'Color         ', inline='cal_sweep_color', group=group_calendar, active = cal_sweep_show_input)

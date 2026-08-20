@@ -274,6 +274,13 @@ type CalendarSource
     float prior_low
     int prior_high_idx         // bar index where prior_high occurred (Task 4: sweep line left anchor)
     int prior_low_idx          // bar index where prior_low occurred
+    int last_period_time       // previous bar's time(period) value, for manual rollover detection —
+                                // NOT ta.change(): UpdatePeriod runs 3x/bar (once per source, from the
+                                // shared for-source-in-cal_sources loop), and ta.change() keeps its
+                                // state per call SITE, not per argument value, so a single ta.change()
+                                // call site hit with 3 different sources' time(period) values in the
+                                // same bar would cross-contaminate their "did it change" results
+                                // (Day's call would see Week's prior value as its own, etc.)
     // Setup tracking state — mirrors CandleSet (above), minus candles/trace
     array<Sweep> sweeps
     array<Setup> setups        // completed setups for history
@@ -2094,8 +2101,17 @@ method Update(CandleSet candleSet) =>
     candleSet
 
 // Calendar Level period tracking (Task 3) — rolls current-period H/L into prior-period H/L on
-// day/week/month rollover. Uses the same ta.change(time(tf)) convention as the Fractal HTF
-// track's isNewHTFCandle (:2585), not request.security, per the existing repo convention.
+// day/week/month rollover. Originally used ta.change(time(tf)) (the Fractal HTF track's
+// isNewHTFCandle convention, :2970) instead of request.security, per the existing repo
+// convention. Task 12 fix: switched to manual previous-value tracking (source.last_period_time)
+// instead — this method is called 3x/bar from the shared `for source in cal_sources` loop
+// (once per Day/Week/Month source), and ta.* functions key their internal state by CALL SITE,
+// not by argument value. A single ta.change() call site hit 3 times in the same bar with 3
+// different sources' time(period) — "D", then "W", then "M" — would have each call clobber the
+// next one's "previous value" state, so e.g. Week's rollover check could see Day's prior
+// timestamp instead of its own. Manual tracking keeps each source's state on its own object,
+// independent of call order, and also resolves the "ta.change in a conditional scope" compiler
+// warning this had, since there's no ta.* call left in this method's reachable path at all.
 // Prior-period H/L is the swept reference — Calendar High/Low, labeled PDH/PDL, PWH/PWL,
 // PMH/PML on chart (CONTEXT.md). Only touches sources with .enabled true (Task 1 toggle).
 // Tracks bar indices alongside the values (like Candle.h_idx/l_idx) — Task 4 sweep detection
@@ -2103,7 +2119,9 @@ method Update(CandleSet candleSet) =>
 // prev_htf.h_idx/l_idx from, per the design note at the top of Tasks.md).
 method UpdatePeriod(CalendarSource source) =>
     if source.enabled
-        bool isNewPeriod = ta.change(time(source.period)) > 0
+        int cur_period_time = time(source.period)
+        bool isNewPeriod = not na(source.last_period_time) and cur_period_time != source.last_period_time
+        source.last_period_time := cur_period_time
         if isNewPeriod or na(source.cur_high)
             // Rollover — or the very first bar, where na(cur_high) is true and there is no
             // prior period yet, so prior_high/prior_low simply stay na until one exists.
@@ -2967,7 +2985,11 @@ bool isNewQuarterlySession = currentQuarterlySession != prevQuarterlySession and
 prevQuarterlySession := currentQuarterlySession
 
 // Check if this is a new HTF candle (works for both timeframe-based and session-based modes)
-bool isNewHTFCandle = isQuarterlyMode() ? isNewQuarterlySession : ta.change(time(htf.settings.htf)) > 0
+// ta.change() must run unconditionally every bar (Pine compiler warning, Task 12 fix) — it was
+// previously only reached inside the false branch of the ternary below, so it's hoisted out into
+// its own unconditional statement first.
+bool isNewHTFCandleTf = ta.change(time(htf.settings.htf)) > 0
+bool isNewHTFCandle = isQuarterlyMode() ? isNewQuarterlySession : isNewHTFCandleTf
 
 // SMT Tracker updates - reset on new HTF candle, update high/low every bar
 if isNewHTFCandle and smt_show_input

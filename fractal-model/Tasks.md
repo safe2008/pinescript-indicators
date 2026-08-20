@@ -49,8 +49,8 @@ Key finding from investigating the current code before writing this list: `Setup
 - [x] Perf/object-budget review of pre-existing code, not just the new feature
 
 ## 11. Docs
-- [ ] Update `fractal-model/README.md` with the Calendar Level sequence, settings table entries, and drawn-elements section
-- [ ] Extend `fractal-model/CONTEXT.md` only if new terms surface during implementation
+- [x] Update `fractal-model/README.md` with the Calendar Level sequence, settings table entries, and drawn-elements section
+- [x] Extend `fractal-model/CONTEXT.md` only if new terms surface during implementation
 
 ## 12. Release
 - [ ] Manual validation in TradingView's Pine Editor (no local compiler) — golden path: verify a PDH sweep → C2 → CISD → projection on a live chart for each of Day/Week/Month, both directions

@@ -30,6 +30,22 @@ The higher-timeframe high or low is the reference point. A sweep alone is not en
 4. A later close below the calculated CISD level confirms the move.
 5. Optional liquidity lines, projection levels, and position-sizing boxes help frame the next downside objective.
 
+## Calendar Level Sequence
+
+Independent of the `Fractal` selector, the script can also track the prior day, week, and month's high and low as a fixed calendar-period reference — `Calendar High` / `Calendar Low`, labeled on chart as `PDH`/`PDL`, `PWH`/`PWL`, and `PMH`/`PML`. Turn Day, Week, and Month on individually; each runs its own Sweep -> C2 -> CISD track, entirely separate from the Fractal HTF track and from the other Calendar periods.
+
+```text
+Prior day/week/month high or low -> sweep -> close back through the level -> C2 -> CISD confirmed
+```
+
+1. Price trades beyond the prior period's high (bearish) or low (bullish).
+2. The active candle closes back through that level, and the script marks the reversal candidate as `C2`.
+3. The script tracks the swing extreme and the CISD level candle-by-candle from there, the same way it does for the Fractal HTF track.
+4. Once price closes through the CISD level, the setup is confirmed in a single step. Calendar Levels don't wait on additional candle closes the way the Fractal HTF `C2 -> C3 -> C4` sequence does — there's no higher-timeframe candle series for a Calendar Level to advance through, so confirmation and the projection anchors are set together as soon as CISD triggers.
+5. A confirmed-pending setup keeps tracking its originally swept level even if the calendar period rolls over (a new day, week, or month starts) before confirmation. Only later sweeps use the new period's high/low.
+
+Calendar Levels reuse the model's global `Bias` filter and projection settings rather than adding separate copies. Sweep and CISD-confirmation alerts fire per period and direction through the same dynamic alert (see `Alerts?` below) the Fractal HTF track uses — there is no separate alert entry per Calendar period. Calendar Levels don't add a candle-projection panel, formation-liquidity lines, or entry-zone boxes of their own.
+
 ## What The Script Draws
 
 ### Higher-Timeframe Candle Projection
@@ -52,6 +68,10 @@ After confirmation, the script can draw range-based projection levels from the s
 
 The optional formation-liquidity lines mark selected C1/C0 levels. The position sizer uses the CISD, C2 extreme, and configured risk/reward ratio to draw a visual entry, stop, and target plan.
 
+### Calendar Level Lines And Setups
+
+When a Day, Week, or Month track is enabled, the script draws a line at that period's prior high and low, labeled `PDH`/`PDL`, `PWH`/`PWL`, or `PMH`/`PML`. Sweep lines, `C2` labels, the CISD line, and (if enabled) projection levels for Calendar Level setups use their own color settings, kept separate from the Fractal HTF colors. Calendar Levels don't draw a higher-timeframe candle-projection panel, formation-liquidity lines, or entry-zone/position-sizer boxes — those stay specific to the Fractal HTF track.
+
 ## Settings To Start With
 
 | Setting | Suggested starting point | What it changes |
@@ -63,6 +83,11 @@ The optional formation-liquidity lines mark selected C1/C0 levels. The position 
 | `Enable Projections` | Off at first | Adds range-based target references after confirmation. |
 | `Enable Position Sizer` | Off at first | Adds visual entry, risk, and reward boxes. |
 | `Calculate on Close` | On | Uses confirmed candles and can reduce live-chart workload. |
+| `Day` / `Week` / `Month` (Calendar Levels) | Off at first | Enables an independent Sweep -> C2 -> CISD track for that period's prior high/low. |
+| `Show Levels` (Calendar Levels) | On | Shows the `PDH`/`PDL`-style reference line for each enabled period. |
+| `Show Sweeps` (Calendar Levels) | On | Shows sweep lines and live setup tracking for Calendar Level setups. |
+| `Show CISD` (Calendar Levels) | On | Shows the confirmation level for Calendar Level setups. |
+| `Show Projections` (Calendar Levels) | Off at first | Adds range-based target references after a Calendar Level setup confirms. |
 
 ## Using It In TradingView
 

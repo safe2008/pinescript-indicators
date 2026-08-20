@@ -1021,6 +1021,19 @@ FindCandleIndex(array<Candle> candles, int o_idx) =>
                 break
     found
 
+// Task 10 fix: guards bar-offset history reads (open[n]/close[n]/low[n]/high[n]) against Pine's
+// max_bars_back ceiling. This indicator's indicator() call sets max_bars_back = 5000, which is
+// itself Pine's platform-enforced maximum (confirmed un-raisable, Task 9) — a dynamic offset
+// beyond that either errors or returns na at runtime. FindCISDLevel's own internal search loop
+// is separately capped at 500 bars, but that bounds a DIFFERENT thing (how far back it searches
+// from the extreme bar for a CISD candle) — it does not bound how far bar_index - extreme_bar_idx
+// / bar_index - cisd_start_idx can grow once a setup keeps tracking for a long time before CISD
+// confirms. That gap is unbounded for Calendar (Week/Month sources have no forced C2-close
+// deadline the way the Fractal HTF path does), so any code that reads open/close/low/high[n]
+// using n = bar_index - <a bar captured earlier during tracking> needs this check first.
+SafeLookback(int n1, int n2) =>
+    n1 >= 0 and n1 <= 4900 and n2 >= 0 and n2 <= 4900
+
 // FindCISDLevel traces back from the extreme bar to find consecutive opposing candles
 // Returns [cisd_level, cisd_start_idx]
 // extreme_bar_idx: the bar index where lowest low (bullish) or highest high (bearish) occurred
@@ -2226,17 +2239,24 @@ method DetectSweep(CalendarSource source) =>
             if setup.is_confirmed and setup.has_cisd and not setup.cisd_triggered and not na(setup.cisd_end_idx)
                 setup.cisd_triggered := true
                 // Projection anchors (Task 6) — same bar-index-offset math as the Fractal HTF
-                // path (:1482 area), fully candle-independent
+                // path (:1482 area), fully candle-independent. Task 10 fix: guard against the
+                // unbounded-lookback bug flagged in Task 7 / confirmed in Task 9 (a long-tracking
+                // Week/Month setup can push these offsets past Pine's max_bars_back) — skip
+                // setting the anchors (leave them na) rather than reading a wrong or
+                // out-of-range bar. DrawCalendarSource already gates projection drawing on
+                // not na(proj_anchor_0/1), so this just means no projection line for that one
+                // setup instead of a crash or a silently-wrong price.
                 int cisd_lookback = bar_index - setup.cisd_start_idx
+                int extreme_lookback = bar_index - setup.extreme_bar_idx
                 setup.proj_start_idx := setup.cisd_start_idx
                 setup.proj_end_idx := setup.extreme_bar_idx + 1
-                if settings.proj_type == "Wick"
-                    setup.proj_anchor_1 := setup.tracked_extreme
-                    setup.proj_anchor_0 := low[cisd_lookback]
-                else
-                    int extreme_lookback = bar_index - setup.extreme_bar_idx
-                    setup.proj_anchor_1 := math.max(open[extreme_lookback], close[extreme_lookback])
-                    setup.proj_anchor_0 := math.min(open[cisd_lookback], close[cisd_lookback])
+                if SafeLookback(cisd_lookback, extreme_lookback)
+                    if settings.proj_type == "Wick"
+                        setup.proj_anchor_1 := setup.tracked_extreme
+                        setup.proj_anchor_0 := low[cisd_lookback]
+                    else
+                        setup.proj_anchor_1 := math.max(open[extreme_lookback], close[extreme_lookback])
+                        setup.proj_anchor_0 := math.min(open[cisd_lookback], close[cisd_lookback])
                 // Calendar C2→C3→C4 cascade (Task 6): no HTF-candle boundary to wait for, so
                 // CISD confirmation is itself the trigger — collapses C2-close/C3-open/C3-close/
                 // C4-open into this one bar instead of waiting on isNewHTFCandle (see this
@@ -2309,17 +2329,19 @@ method DetectSweep(CalendarSource source) =>
                 setup.cisd_end_idx := bar_index
             if setup.is_confirmed and setup.has_cisd and not setup.cisd_triggered and not na(setup.cisd_end_idx)
                 setup.cisd_triggered := true
-                // Projection anchors (Task 6) — bullish mirror of the bearish block above
+                // Projection anchors (Task 6) — bullish mirror of the bearish block above.
+                // Task 10 fix: same SafeLookback guard as the bearish block — see its comment.
                 int cisd_lookback = bar_index - setup.cisd_start_idx
+                int extreme_lookback = bar_index - setup.extreme_bar_idx
                 setup.proj_start_idx := setup.cisd_start_idx
                 setup.proj_end_idx := setup.extreme_bar_idx + 1
-                if settings.proj_type == "Wick"
-                    setup.proj_anchor_1 := setup.tracked_extreme
-                    setup.proj_anchor_0 := high[cisd_lookback]
-                else
-                    int extreme_lookback = bar_index - setup.extreme_bar_idx
-                    setup.proj_anchor_1 := math.min(open[extreme_lookback], close[extreme_lookback])
-                    setup.proj_anchor_0 := math.max(open[cisd_lookback], close[cisd_lookback])
+                if SafeLookback(cisd_lookback, extreme_lookback)
+                    if settings.proj_type == "Wick"
+                        setup.proj_anchor_1 := setup.tracked_extreme
+                        setup.proj_anchor_0 := high[cisd_lookback]
+                    else
+                        setup.proj_anchor_1 := math.min(open[extreme_lookback], close[extreme_lookback])
+                        setup.proj_anchor_0 := math.max(open[cisd_lookback], close[cisd_lookback])
                 // Calendar C2→C3→C4 cascade (Task 6) — see the bearish block above / this
                 // method's doc comment for the full design note
                 setup.is_post_c2 := true

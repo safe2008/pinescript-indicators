@@ -44,9 +44,9 @@ Key finding from investigating the current code before writing this list: `Setup
 - [x] Re-check `max_boxes_count`/`max_lines_count`/`max_labels_count` in the `indicator(...)` call — 3 more parallel tracks add persistent drawing objects; raise if needed and note why
 
 ## 10. Cross-cutting (from broader update scope)
-- [ ] Bug-fix pass over existing sweep/C2/CISD logic (no specific report — general review while in this code)
-- [ ] TradingView House Rules compliance check (alert completeness, description, repainting disclosure)
-- [ ] Perf/object-budget review of pre-existing code, not just the new feature
+- [x] Bug-fix pass over existing sweep/C2/CISD logic (no specific report — general review while in this code)
+- [x] TradingView House Rules compliance check (alert completeness, description, repainting disclosure)
+- [x] Perf/object-budget review of pre-existing code, not just the new feature
 
 ## 11. Docs
 - [ ] Update `fractal-model/README.md` with the Calendar Level sequence, settings table entries, and drawn-elements section

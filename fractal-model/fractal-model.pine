@@ -3170,6 +3170,73 @@ method DrawCalendarSource(CalendarSource source) =>
                                 bin.labels.push(label.new(setup.proj_start_idx, price, str.tostring(dev), color = color_transparent, textcolor = cal_settings.proj_color, style = label.style_label_right, size = LabelSize(settings.proj_label_size)))
     source
 
+// Reference HTF drawing (Tasks.md section 5) — sibling methods to the primary-track ones above
+// (CalculatePositions/DrawCandles/DrawLabels), per Tasks.md Key Finding 1: those methods pull
+// colors/sizes/toggles from the single global `settings` object, not `candleSet.settings`, so a
+// second CandleSet can't reuse them without drawing with the primary track's cosmetics. Candle
+// body/border/wick colors are the one deliberate exception — DrawReferenceCandles reuses the
+// global settings.bull_body/etc. on purpose (ReferenceSettings comment, :179-187) so both tracks
+// read as one visual system. DrawVTHLLines is fully generic already (only reads
+// candleSet.settings) and is reused directly on htf2 in DrawAllReference below — no duplicate.
+// No DrawTrace/DrawSetups equivalent: Reference HTF has no HTF-open trace and no
+// Sweep → C2 → CISD → projection pipeline (CONTEXT.md scope boundary).
+method CalculatePositionsReference(CandleSet candleSet, int offset) =>
+    size = candleSet.candles.size()
+    if size > 0
+        for i = size - 1 to 0 by 1
+            Candle candle = candleSet.candles.get(i)
+            t_buffer = offset + (ref_settings.width + 1) * (size - i - 1)
+            candle.candle_left := bar_index + t_buffer
+            candle.candle_right := bar_index + ref_settings.width + t_buffer
+            candle.wick_x := bar_index + ref_settings.width / 2 + t_buffer
+    candleSet
+
+method DrawReferenceCandles(CandleSet candleSet) =>
+    for candle in candleSet.candles
+        bull = candle.c > candle.o
+        // Same body/border/wick colors as primary HTF (global settings.*) — correction #1.
+        bin.boxes.push(box.new(candle.candle_left, math.max(candle.o, candle.c), candle.candle_right, math.min(candle.o, candle.c), bull ? settings.bull_border : settings.bear_border, 1, bgcolor = bull ? settings.bull_body : settings.bear_body))
+        // Draw wicks
+        bin.lines.push(line.new(candle.wick_x, candle.h, candle.wick_x, math.max(candle.o, candle.c), color = bull ? settings.bull_wick : settings.bear_wick))
+        bin.lines.push(line.new(candle.wick_x, math.min(candle.o, candle.c), candle.wick_x, candle.l, color = bull ? settings.bull_wick : settings.bear_wick))
+    candleSet
+
+method DrawReferenceLabel(CandleSet candleSet, int offset) =>
+    size = candleSet.candles.size()
+    if size > 0 and ref_settings.label_show
+        top = CandleSetHigh(candleSet.candles, 0)
+        bottom = CandleSetLow(candleSet.candles, top)
+        left = bar_index + offset + (ref_settings.width + 1) * (size - 1) / 2
+
+        // One-line format, distinct from primary's two-line "TF\n\n(remaining)" (:2679-2681) —
+        // correction #2 from the reference screenshot: e.g. "1D close 15:10:16".
+        string lbl_text = HTFName(candleSet.settings.htf)
+        if ref_settings.timer_show
+            lbl_text := lbl_text + ' close ' + RemainingTime(candleSet.settings.htf)
+
+        if ref_settings.label_position == 'Both' or ref_settings.label_position == 'Top'
+            bin.labels.push(label.new(left, top, lbl_text, color = color_transparent, textcolor = ref_settings.label_color, style = label.style_label_down, size = ref_settings.label_size))
+        if ref_settings.label_position == 'Both' or ref_settings.label_position == 'Bottom'
+            bin.labels.push(label.new(left, bottom, lbl_text, color = color_transparent, textcolor = ref_settings.label_color, style = label.style_label_up, size = ref_settings.label_size))
+    candleSet
+
+// Liquidity Mark lines — mirrors DrawSweeps' general "line from stored price/idx to a confirm
+// point" shape (:2654-2670), but marks live in the global ref_liq_marks array, not on
+// candleSet.sweeps (Tasks.md section 2: a Liquidity Mark never spawns a Setup, so it doesn't
+// belong on candleSet), hence candleSet is unused here — kept as the method receiver only so
+// this composes into DrawAllReference's chain like the other sibling methods.
+method DrawLiquidityMarks(CandleSet candleSet) =>
+    if ref_settings.liq_show
+        liq_line_style = LineStyle(ref_settings.liq_style)
+        for mark in ref_liq_marks
+            // Bias filter (Tasks.md section 4, deferred to draw time) — same convention as
+            // DrawSetups' bias_ok (:2712): Bullish setups come from a low sweep (setup.is_bullish,
+            // :58), so Bullish shows only low-side marks and Bearish shows only high-side marks.
+            bool bias_ok = settings.bias == 'Neutral' or (settings.bias == 'Bullish' and not mark.is_high) or (settings.bias == 'Bearish' and mark.is_high)
+            if bias_ok
+                bin.lines.push(line.new(mark.extreme_idx, mark.price, mark.confirm_idx, mark.price, color = ref_settings.liq_color, style = liq_line_style, width = ref_settings.liq_width))
+    candleSet
+
 method DrawAll(CandleSet candleSet, int offset) =>
     // Always calculate positions (needed for HTF sweep line drawing)
     candleSet.CalculatePositions(offset)
@@ -3186,6 +3253,17 @@ method DrawAll(CandleSet candleSet, int offset) =>
     // Draw setups (projections, sweeps, CISD, liquidity) - skip if hide_setups enabled
     if not settings.hide_setups
         candleSet.DrawSetups()
+    candleSet
+
+// Composes the Reference HTF sibling methods above, mirrors how DrawAll composes the primary
+// ones. No hide_candles/hide_setups gate — ReferenceSettings has no such toggles (CONTEXT.md
+// scope: candle + VT + HL + label + Liquidity Mark only, always drawn together when enabled).
+method DrawAllReference(CandleSet candleSet, int offset) =>
+    candleSet.CalculatePositionsReference(offset)
+    candleSet.DrawVTHLLines()
+    candleSet.DrawReferenceCandles()
+    candleSet.DrawReferenceLabel(offset)
+    candleSet.DrawLiquidityMarks()
     candleSet
 
 // ============================================================================
@@ -3356,6 +3434,11 @@ for i = 0 to cal_sources.size() - 1
 if barstate.islast or barstate.isrealtime
     if valid_htf
         htf.DrawAll(offset)
+    // Reference HTF drawing - independent of the Fractal selector / valid_htf gate above, gated
+    // on its own enable toggle + ValidTimeframe check (mirrors the Monitor gate at :3296) and its
+    // own ref_settings.offset (not the primary track's offset above)
+    if ref_settings.enabled and valid_ref_htf
+        htf2.DrawAllReference(ref_settings.offset)
     // Calendar Level drawing - independent of the Fractal selector / valid_htf gate above
     for source in cal_sources
         source.DrawCalendarSource()

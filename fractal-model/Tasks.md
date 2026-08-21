@@ -39,13 +39,13 @@ Implements the **Reference HTF** and **Liquidity Mark** concepts defined in [`CO
 - [ ] Apply `settings.bias` filter at draw time (skip low-side marks when Bearish-only, high-side when Bullish-only) — no new bias state, just a condition in the draw step (Q1 round 4) — **deferred to section 5**, detection intentionally records both sides unconditionally
 
 ## 5. Drawing
-- [ ] `DrawReferenceCandles` / `DrawReferenceVTHL` / `DrawReferenceLabel` sibling methods reading the new dedicated settings struct (Key Finding 1) — do not modify `DrawCandles`/`DrawVTHLLines`/`DrawLabels`
-- [ ] `DrawReferenceCandles` colors: use the global `settings.bull_body`/`bear_body`/`bull_border`/`bear_border`/`bull_wick`/`bear_wick` (same values primary draws with), NOT a Reference-HTF-specific color — corrected per reference screenshot (Q1), `ReferenceSettings` has no color fields for this anymore
-- [ ] `DrawReferenceLabel` text format: `HTFName(candleSet.settings.htf) + ' close ' + RemainingTime(candleSet.settings.htf)` — e.g. `"1D close 15:10:16"`, ONE line — corrected per reference screenshot (Q2), do NOT reuse primary's two-line `TF\n\n(remaining)` format (`:2470-2472`) for Reference HTF. `HTFName`/`RemainingTime` (`:1015`/`:987`) are free functions, not tied to the primary track — reusable as-is.
-- [ ] `CalculatePositions`-equivalent for `htf2` — needs its own width/offset (from the new settings struct), so also a sibling, not the shared method (`:2401-2410` reads global `settings.width`)
-- [ ] `DrawLiquidityMarks` — new method, one dotted line per stored mark (from tracked-extreme price/idx to the confirming candle), using the dedicated Liquidity Mark color/style/width inputs; do not route through `DrawSweeps` (`:2445-2461`, primary-only colors/toggle, and semantically these are not `Sweep`s per `CONTEXT.md`)
-- [ ] No candle-projection setup drawing (no `DrawSetups` equivalent) — confirms scope boundary from round 1
-- [ ] Wire into Main Execution's drawing block (`:3131-3137`), gated on `barstate.islast or barstate.isrealtime` and Reference HTF's own enable + valid-timeframe checks (mirror `valid_htf`/`ValidTimeframe` pattern, `:3064`)
+- [x] `DrawReferenceCandles` / `DrawReferenceLabel` sibling methods reading the new dedicated settings struct (Key Finding 1) — `DrawVTHLLines` confirmed fully generic (reads only `candleSet.settings`) and reused directly on `htf2`, no sibling needed. `DrawCandles`/`DrawVTHLLines`/`DrawLabels` bodies unmodified.
+- [x] `DrawReferenceCandles` colors: global `settings.bull_body`/`bear_body`/`bull_border`/`bear_border`/`bull_wick`/`bear_wick`, per Q1 correction
+- [x] `DrawReferenceLabel` text format: `HTFName(...) + ' close ' + RemainingTime(...)`, one line, per Q2 correction
+- [x] `CalculatePositionsReference` — sibling reading `ref_settings.width`/`offset`
+- [x] `DrawLiquidityMarks` — new method, one line per stored mark from `mark.extreme_idx`/`price` to `mark.confirm_idx`/`price`, using `ref_settings.liq_*`; bias filter applied here (`Bullish → not mark.is_high`, `Bearish → mark.is_high`, matched against `DrawSetups`' `bias_ok` convention — `is_bullish` = low sweep, confirmed at `:58`). Does not route through `DrawSweeps`.
+- [x] No `DrawSetups` equivalent
+- [x] `DrawAllReference` composes the above (mirrors `DrawAll`), wired into Main Execution's drawing block gated on `ref_settings.enabled` + `valid_ref_htf`, using `ref_settings.offset`
 
 ## 6. Object-budget check
 - [ ] Count new persistent objects: candle body (1 box) + 2 wick lines + optional dow-style label per candle × max-display; VT line + 2 HL lines per candle; 1-2 label objects; 1 line per stored Liquidity Mark × history count

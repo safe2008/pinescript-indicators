@@ -36,6 +36,15 @@ type Sweep
     int ltf_end_idx
     bool is_high  // true = high sweep, false = low sweep
 
+// Liquidity Mark — the breach-and-close-back event on a Reference HTF candle (CONTEXT.md).
+// Deliberately not the Sweep type above: Sweep's htf_candle_idx/swept_candle_idx pair
+// assumes a Setup will follow; a Liquidity Mark never spawns a C2/CISD/projection.
+type LiquidityMark
+    float price       // tracked extreme price that was breached
+    int extreme_idx   // bar index where the tracked extreme occurred
+    int confirm_idx   // bar index where the confirming close-back happened
+    bool is_high      // true = high-side mark, false = low-side mark (for the Bias filter at draw time)
+
 // Completed IC-CISD (confirmed only)
 type ICCisd
     float level
@@ -166,6 +175,34 @@ type CalendarSettings
     color proj_color
     string proj_style
     int proj_width
+
+// Reference HTF settings — layout/label cosmetics for the second, independently-configured
+// HTF candle series (CONTEXT.md). Candle body/border/wick color is deliberately NOT here —
+// Reference HTF renders in the same body/border/wick colors as primary HTF (reuses the
+// global `settings.bull_body`/etc. below at draw time) so the two tracks read as one visual
+// system, matching the reference screenshot (uniform color across 7H/1D/1W boxes). Own
+// dedicated type for what DOES need to differ per-track (timeframe, layout, label text,
+// Liquidity Mark) — same reasoning as `CalendarSettings` above being its own type rather
+// than reusing `Settings` wholesale. htf/max_display/vt_*/hl_* live on a reused
+// CandleSettings instance instead (same shape).
+type ReferenceSettings
+    bool enabled              // "Enable Reference HTF?" master toggle
+    string custom_tf          // custom timeframe input, independent of the Fractal HTF selector
+    int width
+    int offset
+    bool label_show
+    color label_color
+    string label_size
+    string label_position
+    bool timer_show
+    color timer_color
+    string timer_size
+    // Liquidity Mark settings
+    bool liq_show
+    color liq_color
+    string liq_style
+    int liq_width
+    int liq_history
 
 type Settings
     color bull_body
@@ -355,6 +392,38 @@ if array.size(cal_sources) == 0
     cal_sources.push(cal_week)
     cal_sources.push(cal_month)
 
+// Reference HTF — second, independently-configured higher-timeframe candle series,
+// projected beside the chart for visual context (CONTEXT.md). Parallel to the single `htf`
+// CandleSet above. Backing arrays go through their own `var` bindings (same reasoning as
+// candles_1/sweeps_1/setups_1 above) so re-linking on `:=` doesn't clear history each bar.
+// sweeps_2/setups_2 stay permanently empty — Reference HTF has no Setup pipeline; it carries
+// a Liquidity Mark instead of a Sweep.
+var array<Candle> candles_2 = array.new<Candle>(0)
+var array<Sweep> sweeps_2 = array.new<Sweep>()
+var array<Setup> setups_2 = array.new<Setup>()
+
+var CandleSettings Settingshtf2 = CandleSettings.new()
+var ReferenceSettings ref_settings = ReferenceSettings.new()
+
+var CandleSet htf2 = CandleSet.new()
+htf2.settings := Settingshtf2
+htf2.candles := candles_2
+htf2.sweeps := sweeps_2
+htf2.setups := setups_2
+htf2.trace := Trace.new()
+
+// Liquidity Mark tracking state — running unswept high/low on the Reference HTF track.
+// Tracks the nearest unswept extreme (running highest-high / lowest-low until actually
+// taken), not just the immediately prior candle — see Tasks.md Key Finding 2. Two
+// independent trackers, high-side and low-side, each reset once its side is confirmed.
+var float ref_unswept_high = na
+var int ref_unswept_high_idx = na
+var float ref_unswept_low = na
+var int ref_unswept_low_idx = na
+
+// Confirmed Liquidity Marks — trimmed to ref_settings.liq_history (trim logic added later)
+var array<LiquidityMark> ref_liq_marks = array.new<LiquidityMark>()
+
 // Initialize drawing bin
 var DrawingBin bin = DrawingBin.new(
     lines = array.new<line>(),
@@ -373,6 +442,7 @@ var array<float> proj_deviations = array.new_float()
 string group_general            = "General Settings  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 string group_htf               = "HTF Candles  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 string group_calendar           = "Calendar Levels  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+string group_htf2               = "Reference HTF  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 string group_sweep              = "Model Settings  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 string group_label              = "Label Settings  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 string group_imbalance          = "Imbalance  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -716,6 +786,48 @@ cal_settings.proj_show          := cal_proj_show_input
 cal_settings.proj_color         := input.color(color.rgb(0,0,0,80), '', inline='cal_proj_style', group=group_calendar, active = cal_proj_show_input)
 cal_settings.proj_style         := input.string('Solid', '', options=['Solid', 'Dashed', 'Dotted'], inline='cal_proj_style', group=group_calendar, active = cal_proj_show_input)
 cal_settings.proj_width         := input.int(1, 'Width', inline='cal_proj_style', group=group_calendar, active = cal_proj_show_input)
+
+// Reference HTF — second, independently-configured HTF candle series projected beside the
+// chart for visual context (CONTEXT.md). No Fractal-style mode/preset selector (deliberately
+// simpler than the primary Fractal HTF); no Sweep → C2 → CISD → projection tracking — only a
+// Liquidity Mark. Reuses settings.bias for direction filtering at draw time; no new Bias input.
+ref_enabled_input               = input.bool(false, 'Enable Reference HTF?', group=group_htf2, tooltip='A second, independently-configured HTF candle series for visual context. Does not track Sweep → C2 → CISD → projection — only a Liquidity Mark (breach + close-back, CONTEXT.md).')
+ref_settings.enabled            := ref_enabled_input
+ref_settings.custom_tf          := input.timeframe('240', 'Timeframe        ', group=group_htf2, active = ref_enabled_input)
+htf2.settings.htf               := ref_settings.custom_tf
+htf2.settings.max_display       := input.int(4, 'HTF Candles      ', minval=4, group=group_htf2, inline='ref_htf_candles', active = ref_enabled_input)
+ref_candle_size_input           = input.string('Small', 'Size', options=['Small', 'Normal', 'Big'], group=group_htf2, inline='ref_htf_candles', active = ref_enabled_input)
+ref_settings.width              := ref_candle_size_input == 'Small' ? 2 : ref_candle_size_input == 'Normal' ? 4 : 6
+ref_settings.offset             := input.int(10, 'Offset           ', minval = 1, group=group_htf2, inline='ref_offset', active = ref_enabled_input)
+// No dedicated body/border/wick color inputs — Reference HTF candles draw with the primary
+// HTF's settings.bull_body/bear_body/bull_border/bear_border/bull_wick/bear_wick (see draw
+// step) so the two tracks read as one visual system (reference screenshot: uniform color
+// across 7H/1D/1W boxes), not a separately-styled track.
+ref_vt_show_input               = input.bool(true, 'Vertical Lines ', inline = 'ref_vt', group=group_htf2, active = ref_enabled_input)
+htf2.settings.vt_show           := ref_vt_show_input
+htf2.settings.vt_color          := input.color(color.rgb(41,98,255,70), '', inline = 'ref_vt', group=group_htf2, active = ref_enabled_input and ref_vt_show_input)
+htf2.settings.vt_style          := input.string('Solid', '', options = ['Solid', 'Dashed', 'Dotted'], inline = 'ref_vt', group=group_htf2, active = ref_enabled_input and ref_vt_show_input)
+htf2.settings.vt_size           := input.int(1, 'Width', options = [1, 2, 3, 4], inline = 'ref_vt', group=group_htf2, active = ref_enabled_input and ref_vt_show_input)
+ref_hl_show_input               = input.bool(true, 'L/H Lines     ', inline='ref_lh', group=group_htf2, active = ref_enabled_input)
+htf2.settings.hl_show           := ref_hl_show_input
+htf2.settings.hl_color          := input.color(color.rgb(41,98,255,70), '', inline='ref_lh', group=group_htf2, active = ref_enabled_input and ref_hl_show_input)
+htf2.settings.hl_style          := input.string('Dotted', '', options=['Solid','Dashed','Dotted'], inline='ref_lh', group=group_htf2, active = ref_enabled_input and ref_hl_show_input)
+htf2.settings.hl_width          := input.int(1, 'Width', options=[1,2,3,4], inline='ref_lh', group=group_htf2, active = ref_enabled_input and ref_hl_show_input)
+ref_label_show_input            = input.bool(true, 'HTF Label     ', group=group_htf2, inline = 'ref_htflabel', active = ref_enabled_input)
+ref_settings.label_show         := ref_label_show_input
+ref_settings.label_color        := input.color(color.rgb(41,98,255), '', group=group_htf2, inline = 'ref_htflabel', active = ref_enabled_input and ref_label_show_input)
+ref_settings.label_size         := input.string(size.large, '', [size.tiny, size.small, size.normal, size.large, size.huge], group=group_htf2, inline = 'ref_htflabel', active = ref_enabled_input and ref_label_show_input)
+ref_settings.label_position     := input.string("Top", 'Pos', options=['Both', 'Top', 'Bottom'], group=group_htf2, inline = 'ref_htflabel', active = ref_enabled_input and ref_label_show_input)
+ref_timer_show_input            = input.bool(true, 'Remaining Time', inline = 'ref_timer', group=group_htf2, active = ref_enabled_input and ref_label_show_input)
+ref_settings.timer_show         := ref_timer_show_input
+ref_settings.timer_color        := input.color(color.rgb(41,98,255), '', inline = 'ref_timer', group=group_htf2, active = ref_enabled_input and ref_label_show_input and ref_timer_show_input)
+ref_settings.timer_size         := input.string(size.normal, '', [size.tiny, size.small, size.normal, size.large, size.huge], group=group_htf2, inline = 'ref_timer', active = ref_enabled_input and ref_label_show_input and ref_timer_show_input)
+ref_liq_show_input              = input.bool(true, 'Liquidity Mark', inline='ref_liq', group=group_htf2, active = ref_enabled_input, tooltip='Breach-and-close-back event on the Reference HTF track (CONTEXT.md). Mechanically similar to a Sweep, but never creates a reversal candidate — no C2, no CISD, no projection follows.')
+ref_settings.liq_show           := ref_liq_show_input
+ref_settings.liq_color          := input.color(color.rgb(41,98,255), '', inline='ref_liq', group=group_htf2, active = ref_enabled_input and ref_liq_show_input)
+ref_settings.liq_style          := input.string('Dotted', '', options=['Solid', 'Dashed', 'Dotted'], inline='ref_liq', group=group_htf2, active = ref_enabled_input and ref_liq_show_input)
+ref_settings.liq_width          := input.int(1, 'Width', options=[1,2,3,4], inline='ref_liq', group=group_htf2, active = ref_enabled_input and ref_liq_show_input)
+ref_settings.liq_history        := input.int(10, 'History', minval=0, group=group_htf2, active = ref_enabled_input and ref_liq_show_input)
 
 sweep_show_input                = input.bool(true, 'Show Sweeps   ', group=group_sweep, inline='sweep')
 settings.sweep_show             := sweep_show_input

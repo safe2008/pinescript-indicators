@@ -27,3 +27,11 @@ _Avoid_: HTF level
 **Calendar High / Calendar Low**:
 The high or low of a Calendar Level's period — the price a Sweep is measured against. Labeled on chart as PDH/PWH/PMH (highs) and PDL/PWL/PML (lows) for Day/Week/Month respectively.
 _Avoid_: Treating PDH/PDL etc. as a separate concept — they are the on-chart labels for Calendar High/Low, not a distinct idea.
+
+**Reference HTF**:
+A second, independently-configured higher-timeframe candle series (own custom timeframe input) projected beside the chart for visual context. Unlike Fractal HTF and Calendar Level, it does not drive Sweep → C2 → CISD → projection tracking — it carries a Liquidity Mark instead of a Sweep.
+_Avoid_: Bare "HTF", "2nd HTF" — doesn't convey that this track is passive and never spawns a reversal candidate
+
+**Liquidity Mark**:
+The breach-and-close-back event on a Reference HTF candle: price wicks beyond the nearest unswept high/low on that track and closes back inside. Mechanically similar to a Sweep but does not create a reversal candidate — no C2, no CISD, no projection follows.
+_Avoid_: "Sweep", "sweep mark" — Sweep is reserved for events that spawn a C2

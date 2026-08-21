@@ -269,11 +269,12 @@ type CalendarSource
     int cur_high_idx           // bar index where cur_high occurred (running, like Candle.h_idx)
     int cur_low_idx            // bar index where cur_low occurred
     // Prior (completed) period high/low — the swept reference: Calendar High/Low,
-    // labeled PDH/PDL, PWH/PWL, PMH/PML on chart (CONTEXT.md)
+    // labeled PDH/PDL, PWH/PWL, PMH/PML on chart (CONTEXT.md). Sourced from request.security
+    // (ported from 7Hr_Framework.pine's GTrades pattern), not tracked bar-by-bar.
     float prior_high
     float prior_low
-    int prior_high_idx         // bar index where prior_high occurred (Task 4: sweep line left anchor)
-    int prior_low_idx          // bar index where prior_low occurred
+    int prior_high_idx         // period-start bar_index (Task 4: sweep line + level line left anchor)
+    int prior_low_idx          // same period-start bar_index as prior_high_idx
     // Setup tracking state — mirrors CandleSet (above), minus candles/trace
     array<Sweep> sweeps
     array<Setup> setups        // completed setups for history
@@ -683,18 +684,18 @@ drawings_type                  = input.string('Both', 'Drawings Type', options=[
 
 // Calendar Levels — Day/Week/Month period high/low sweep sources, independent of the
 // Fractal selector above. Own color/style scheme (below), reuses settings.bias for direction filtering.
-day_enabled_input               = input.bool(false, 'Day', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Day High/Low (PDH/PDL) as a Calendar Level sweep reference, independent of the Fractal selector.')
+day_enabled_input               = input.bool(true, 'Day', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Day High/Low (PDH/PDL) as a Calendar Level sweep reference, independent of the Fractal selector.')
 cal_settings.day_enabled        := day_enabled_input
 cal_day.enabled                 := day_enabled_input
-week_enabled_input              = input.bool(false, 'Week', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Week High/Low (PWH/PWL) as a Calendar Level sweep reference, independent of the Fractal selector.')
+week_enabled_input              = input.bool(true, 'Week', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Week High/Low (PWH/PWL) as a Calendar Level sweep reference, independent of the Fractal selector.')
 cal_settings.week_enabled       := week_enabled_input
 cal_week.enabled                := week_enabled_input
-month_enabled_input             = input.bool(false, 'Month', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Month High/Low (PMH/PML) as a Calendar Level sweep reference, independent of the Fractal selector.')
+month_enabled_input             = input.bool(true, 'Month', inline='cal_periods', group=group_calendar, tooltip='Track the Previous Month High/Low (PMH/PML) as a Calendar Level sweep reference, independent of the Fractal selector.')
 cal_settings.month_enabled      := month_enabled_input
 cal_month.enabled               := month_enabled_input
 cal_level_show_input            = input.bool(true, 'Show Levels   ', group=group_calendar, inline='cal_level')
 cal_settings.level_show          := cal_level_show_input
-cal_settings.level_color        := input.color(color.rgb(120, 123, 134), '', inline='cal_level_color', group=group_calendar, active = cal_level_show_input)
+cal_settings.level_color        := input.color(color.black, '', inline='cal_level_color', group=group_calendar, active = cal_level_show_input)
 cal_settings.level_style        := input.string('Solid', '', options=['Solid', 'Dashed', 'Dotted'], inline='cal_level_color', group=group_calendar, active = cal_level_show_input)
 cal_settings.level_width        := input.int(1, 'Width', options=[1, 2, 3, 4], inline='cal_level_color', group=group_calendar, active = cal_level_show_input)
 cal_sweep_show_input            = input.bool(true, 'Show Sweeps   ', group=group_calendar, inline='cal_sweep')
@@ -2093,36 +2094,30 @@ method Update(CandleSet candleSet) =>
             candleSet.trace.start_price := candle.o
     candleSet
 
-// Calendar Level period tracking (Task 3) — rolls current-period H/L into prior-period H/L on
-// day/week/month rollover, using the same ta.change(time(tf)) convention as the Fractal HTF
-// track's isNewHTFCandle (:2988), not request.security.
-// isNewPeriod is now passed in (Task 12 fix, see comment at the call site in Main Execution)
-// rather than computed here: this method is called 3x/bar from the shared
-// `for source in cal_sources` loop (once per Day/Week/Month source), and ta.* functions key
-// their internal state by CALL SITE, not by argument value — a ta.change(time(source.period))
-// call living inside this method would be hit 3 times per bar with 3 different arguments ("D",
-// then "W", then "M") from the SAME call site, clobbering each other's "previous value" state
-// (e.g. Week's rollover check could see Day's prior timestamp instead of its own), so isNewPeriod
-// would never reliably fire and prior_high/prior_low would stay na forever. An earlier version of
-// this fix tried tracking each source's own previous timestamp manually instead of using
-// ta.change at all; that traced out as logically correct but was hard to fully verify without a
-// compiler, so it was replaced with this — three separate, textually distinct, unconditional
-// ta.change() calls (one per period) computed once in Main Execution and passed in here — which
-// mirrors the proven-working isNewHTFCandle pattern exactly instead of introducing new logic.
-// Prior-period H/L is the swept reference — Calendar High/Low, labeled PDH/PDL, PWH/PWL,
-// PMH/PML on chart (CONTEXT.md). Only touches sources with .enabled true (Task 1 toggle).
-// Tracks bar indices alongside the values (like Candle.h_idx/l_idx) — Task 4 sweep detection
-// uses prior_high_idx/prior_low_idx as the sweep line's left anchor (no candle series to read
-// prev_htf.h_idx/l_idx from, per the design note at the top of Tasks.md).
-method UpdatePeriod(CalendarSource source, bool isNewPeriod) =>
+// Calendar Level period tracking (Task 3, revised) — prior_high/prior_low (the swept
+// reference: Calendar High/Low, labeled PDH/PDL, PWH/PWL, PMH/PML on chart, CONTEXT.md) now
+// come from request.security(tf, [high[1], low[1]], lookahead=barmerge.lookahead_on) —
+// the same "ported from GTrades" pattern 7Hr_Framework.pine uses for its PDH/PDL/PWH/PWL
+// lines (7Hr_Framework.pine:479-480). sec_prior_high/sec_prior_low/prior_start_idx are
+// computed once per period at the Main Execution call site (mirrors 7Hr's pd_high/pd_low +
+// pdPrevStart) and passed in here, same reasoning as isNewPeriod below — request.security
+// and ta.* both key state by call site, so one shared call per period avoids the Task 12
+// clobbering bug this replaced. This removes the old bug class entirely: prior_high/prior_low
+// no longer depend on cur_high/cur_low having accumulated correctly bar-by-bar since period
+// start — the security call is authoritative regardless of any local tracking gap.
+// prior_high_idx/prior_low_idx anchor the level line's left edge (Task 7 draw) and are now
+// the period-start bar_index (prior_start_idx, from Main Execution) rather than the exact bar
+// the high/low occurred on — matches 7Hr's pdPrevStart/pwPrevStart line anchors exactly.
+// cur_high/cur_low/cur_high_idx/cur_low_idx are UNCHANGED: still the current (forming) period's
+// running high/low, still needed live by DetectSweep to seed a new setup's tracked_extreme —
+// unrelated to the completed-period reference above, so isNewPeriod still resets them at rollover.
+method UpdatePeriod(CalendarSource source, bool isNewPeriod, float sec_prior_high, float sec_prior_low, int prior_start_idx) =>
     if source.enabled
+        source.prior_high := sec_prior_high
+        source.prior_low := sec_prior_low
+        source.prior_high_idx := prior_start_idx
+        source.prior_low_idx := prior_start_idx
         if isNewPeriod or na(source.cur_high)
-            // Rollover — or the very first bar, where na(cur_high) is true and there is no
-            // prior period yet, so prior_high/prior_low simply stay na until one exists.
-            source.prior_high := source.cur_high
-            source.prior_low := source.cur_low
-            source.prior_high_idx := source.cur_high_idx
-            source.prior_low_idx := source.cur_low_idx
             source.cur_high := high
             source.cur_low := low
             source.cur_high_idx := bar_index
@@ -2226,7 +2221,7 @@ method DetectSweep(CalendarSource source) =>
                 // Sweep alert (Task 8)
                 if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bearish")
                     alert(BuildAlertMessage(source.period, false, false, "Sweep"), alert.freq_once_per_bar)
-        else
+        else if SafeLookback(bar_index - source.live_bearish.sweep_ltf_idx, 0)
             // Bearish tracking exists — update extreme and check CISD (Task 5)
             Setup setup = source.live_bearish
             setup.is_confirmed := close < setup.sweep_price
@@ -2290,6 +2285,12 @@ method DetectSweep(CalendarSource source) =>
                 if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bearish")
                     alert(BuildAlertMessage(source.period, false, false, "Candle 2"), alert.freq_once_per_bar)
             ICUpdate(setup, source.period)
+        else
+            // Stale live setup — sweep_ltf_idx (frozen at creation, Task 6's flagged unbounded-
+            // duration gap: Week/Month have no forced C2-close deadline) has aged past line.new's
+            // history limit. Abandon tracking here rather than let DrawCalendarSource's live sweep
+            // line (:2908) crash with "x1 too far from current bar index" on every future bar.
+            source.has_live_bearish := false
 
         // ===== BULLISH TRACKING (when low is wicked) =====
         if not source.has_live_bullish
@@ -2318,7 +2319,7 @@ method DetectSweep(CalendarSource source) =>
                 // Sweep alert (Task 8)
                 if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bullish")
                     alert(BuildAlertMessage(source.period, true, false, "Sweep"), alert.freq_once_per_bar)
-        else
+        else if SafeLookback(bar_index - source.live_bullish.sweep_ltf_idx, 0)
             // Bullish tracking exists — update extreme and check CISD (Task 5)
             Setup setup = source.live_bullish
             setup.is_confirmed := close > setup.sweep_price
@@ -2373,6 +2374,9 @@ method DetectSweep(CalendarSource source) =>
                 if settings.alerts_enabled and (settings.bias == "Neutral" or settings.bias == "Bullish")
                     alert(BuildAlertMessage(source.period, true, false, "Candle 2"), alert.freq_once_per_bar)
             ICUpdate(setup, source.period)
+        else
+            // Stale live setup — same staleness abandon as the bearish block above.
+            source.has_live_bullish := false
     source
 
 // Check CISD trigger for confirmed setups
@@ -2890,12 +2894,17 @@ method DrawCalendarSource(CalendarSource source) =>
             level_line_style = LineStyle(cal_settings.level_style)
             string hi_label = source.period == "D" ? "PDH" : source.period == "W" ? "PWH" : "PMH"
             string lo_label = source.period == "D" ? "PDL" : source.period == "W" ? "PWL" : "PML"
+            // Line end + label sit at bar_index + settings.offset — matches 7Hr_Framework.pine's
+            // xR = bar_index + N (line.new(..., xR, ...), no extend.right there either) and reuses
+            // the same value the HTF candle-projection panel starts at (CalculatePositions, :2407),
+            // instead of extending infinitely or using a second, independent magic number.
+            int lbl_x = bar_index + settings.offset
             if not na(source.prior_high)
-                bin.lines.push(line.new(source.prior_high_idx, source.prior_high, bar_index, source.prior_high, extend = extend.right, color = cal_settings.level_color, style = level_line_style, width = cal_settings.level_width))
-                bin.labels.push(label.new(bar_index, source.prior_high, hi_label, color = color_transparent, textcolor = cal_settings.level_color, style = label.style_label_left, size = size.small))
+                bin.lines.push(line.new(source.prior_high_idx, source.prior_high, lbl_x, source.prior_high, color = cal_settings.level_color, style = level_line_style, width = cal_settings.level_width))
+                bin.labels.push(label.new(lbl_x, source.prior_high, hi_label, color = color_transparent, textcolor = cal_settings.level_color, style = label.style_label_left, size = size.small))
             if not na(source.prior_low)
-                bin.lines.push(line.new(source.prior_low_idx, source.prior_low, bar_index, source.prior_low, extend = extend.right, color = cal_settings.level_color, style = level_line_style, width = cal_settings.level_width))
-                bin.labels.push(label.new(bar_index, source.prior_low, lo_label, color = color_transparent, textcolor = cal_settings.level_color, style = label.style_label_left, size = size.small))
+                bin.lines.push(line.new(source.prior_low_idx, source.prior_low, lbl_x, source.prior_low, color = cal_settings.level_color, style = level_line_style, width = cal_settings.level_width))
+                bin.labels.push(label.new(lbl_x, source.prior_low, lo_label, color = color_transparent, textcolor = cal_settings.level_color, style = label.style_label_left, size = size.small))
 
         sweep_line_style = LineStyle(cal_settings.sweep_style)
         cisd_line_style = LineStyle(cal_settings.cisd_style)
@@ -2928,7 +2937,12 @@ method DrawCalendarSource(CalendarSource source) =>
                 if drawn >= settings.sweep_history
                     break
                 bool bias_ok_h = settings.bias == 'Neutral' or (settings.bias == 'Bullish' and setup.is_bullish) or (settings.bias == 'Bearish' and not setup.is_bullish)
-                if bias_ok_h
+                // SafeLookback guard (same class as the live-tracking staleness check above):
+                // a long-lived Week/Month setup's sweep_ltf_idx can, in principle, still be
+                // older than line.new's history limit even after confirmation — skip drawing
+                // rather than crash. `drawn` only increments for setups actually drawn, so a
+                // skipped stale one doesn't consume a slot a newer setup could use.
+                if bias_ok_h and SafeLookback(bar_index - setup.sweep_ltf_idx, 0)
                     drawn := drawn + 1
                     if cal_settings.sweep_show
                         bin.lines.push(line.new(setup.sweep_ltf_idx, setup.sweep_price, setup.ltf_end_idx, setup.sweep_price, color = cal_settings.sweep_color, style = sweep_line_style, width = cal_settings.sweep_size))
@@ -3072,12 +3086,46 @@ if valid_htf
 bool isNewDayPeriod = ta.change(time("D")) > 0
 bool isNewWeekPeriod = ta.change(time("W")) > 0
 bool isNewMonthPeriod = ta.change(time("M")) > 0
+// Prior-period H/L source (Task 3 revised) — ported from 7Hr_Framework.pine:479-480 (in turn
+// ported from GTrades): request.security's own [1]-offset + lookahead_on already resolves to
+// the last COMPLETED day/week/month's high/low, synchronized so it updates the instant the new
+// period's first bar opens — no local rollover bookkeeping needed for the values themselves.
+[pd_high_sec, pd_low_sec] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+[pw_high_sec, pw_low_sec] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+[pm_high_sec, pm_low_sec] = request.security(syminfo.tickerid, "M", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+// Period-start bar_index — anchors each level line's left edge (mirrors 7Hr's pdPrevStart/
+// pwPrevStart, 7Hr_Framework.pine:489-497). Persisted across bars via `var`, updated only on
+// that period's own rollover flag above.
+var int pdPrevStart = na
+var int pdCurStart  = na
+var int pwPrevStart = na
+var int pwCurStart  = na
+var int pmPrevStart = na
+var int pmCurStart  = na
+if isNewDayPeriod
+    pdPrevStart := pdCurStart
+    pdCurStart  := bar_index
+if isNewWeekPeriod
+    pwPrevStart := pwCurStart
+    pwCurStart  := bar_index
+if isNewMonthPeriod
+    pmPrevStart := pmCurStart
+    pmCurStart  := bar_index
 array<bool> cal_new_period = array.from(isNewDayPeriod, isNewWeekPeriod, isNewMonthPeriod)
+array<float> cal_sec_prior_high = array.from(pd_high_sec, pw_high_sec, pm_high_sec)
+array<float> cal_sec_prior_low = array.from(pd_low_sec, pw_low_sec, pm_low_sec)
+// Clamped to 0: unlike 7Hr_Framework's identical fallback (only ever drawn live on the
+// last bar, where bar_index is always large by then), this value gets captured into
+// Setup.sweep_ltf_idx at sweep-detection time (DetectSweep) and persists — if a sweep fires
+// before the first rollover on an early bar (bar_index < 200/300/400), the un-clamped
+// fallback goes negative, and line.new() later errors ("x1 too far from current bar index")
+// when that stale negative index is redrawn against a much larger current bar_index.
+array<int> cal_prior_start_idx = array.from(na(pdPrevStart) ? math.max(bar_index - 200, 0) : pdPrevStart, na(pwPrevStart) ? math.max(bar_index - 300, 0) : pwPrevStart, na(pmPrevStart) ? math.max(bar_index - 400, 0) : pmPrevStart)
 // UpdatePeriod must run before DetectSweep so a rollover bar's new prior_high/prior_low are
 // in place before that same bar's breach check.
 for i = 0 to cal_sources.size() - 1
     CalendarSource source = cal_sources.get(i)
-    source.UpdatePeriod(cal_new_period.get(i))
+    source.UpdatePeriod(cal_new_period.get(i), cal_sec_prior_high.get(i), cal_sec_prior_low.get(i), cal_prior_start_idx.get(i))
     source.DetectSweep()
 
 // Drawing (only on last bar)

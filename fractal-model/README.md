@@ -46,6 +46,12 @@ Prior day/week/month high or low -> sweep -> close back through the level -> C2 
 
 Calendar Levels reuse the model's global `Bias` filter and projection settings rather than adding separate copies. Sweep and CISD-confirmation alerts fire per period and direction through the same dynamic alert (see `Alerts?` below) the Fractal HTF track uses — there is no separate alert entry per Calendar period. Calendar Levels don't add a candle-projection panel, formation-liquidity lines, or entry-zone boxes of their own.
 
+## Reference HTF
+
+Independent of both the `Fractal` selector and Calendar Levels, the script can project a second higher-timeframe candle series at its own custom timeframe — for visual reference alongside the Fractal HTF track, not as another trade-setup source. Reference HTF does not run the Sweep -> C2 -> CISD -> projection sequence: it has no C2, no CISD, no entry zone, no projections, and no alerts. It draws candles, vertical/high-low reference lines, an HTF label with a close countdown, and a lightweight `Liquidity Mark`.
+
+A `Liquidity Mark` is mechanically similar to a Sweep — price wicks beyond a reference level and closes back through it — but it never creates a reversal candidate. It tracks the nearest not-yet-taken high and low on the Reference HTF track; a mark draws once a candle wicks beyond one of those levels and closes back inside it, then tracking moves on to the next unswept extreme. Reference HTF candles draw in the same body/border/wick colors as the Fractal HTF track, so both read as one visual system rather than a separately-styled overlay. Liquidity Marks respect the model's global `Bias` filter, same as Calendar Levels.
+
 ## What The Script Draws
 
 ### Higher-Timeframe Candle Projection
@@ -72,6 +78,10 @@ The optional formation-liquidity lines mark selected C1/C0 levels. The position 
 
 When a Day, Week, or Month track is enabled, the script draws a line at that period's prior high and low, labeled `PDH`/`PDL`, `PWH`/`PWL`, or `PMH`/`PML`. Sweep lines, `C2` labels, the CISD line, and (if enabled) projection levels for Calendar Level setups use their own color settings, kept separate from the Fractal HTF colors. Calendar Levels don't draw a higher-timeframe candle-projection panel, formation-liquidity lines, or entry-zone/position-sizer boxes — those stay specific to the Fractal HTF track.
 
+### Reference HTF Candle And Liquidity Mark
+
+When enabled, the script projects a second candle panel at Reference HTF's own custom timeframe, alongside the Fractal HTF panel, using the same body/border/wick colors. Its HTF label reads as a single line, e.g. `1D close 15:10:16`, rather than the Fractal HTF label's two-line name-and-countdown layout. A Liquidity Mark draws as a single line spanning from the swept level to the candle that closed back through it.
+
 ## Settings To Start With
 
 | Setting | Suggested starting point | What it changes |
@@ -88,6 +98,9 @@ When a Day, Week, or Month track is enabled, the script draws a line at that per
 | `Show Sweeps` (Calendar Levels) | On | Shows sweep lines and live setup tracking for Calendar Level setups. |
 | `Show CISD` (Calendar Levels) | On | Shows the confirmation level for Calendar Level setups. |
 | `Show Projections` (Calendar Levels) | Off at first | Adds range-based target references after a Calendar Level setup confirms. |
+| `Enable Reference HTF?` | Off at first | Adds a second, independently-timeframed HTF candle panel for visual reference — no Sweep -> C2 -> CISD tracking. |
+| `Timeframe` (Reference HTF) | A timeframe distinct from `Fractal`'s | Sets Reference HTF's own candle timeframe. |
+| `Liquidity Mark` (Reference HTF) | On | Shows the breach-and-close-back mark on the Reference HTF track. |
 
 ## Using It In TradingView
 

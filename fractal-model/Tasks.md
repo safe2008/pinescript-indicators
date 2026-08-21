@@ -54,7 +54,7 @@ Implements the **Reference HTF** and **Liquidity Mark** concepts defined in [`CO
 
 ## 7. Docs
 - [x] `CONTEXT.md` — Reference HTF and Liquidity Mark terms added (this session)
-- [ ] `fractal-model/README.md` — add Reference HTF section: what it draws, settings, how Liquidity Mark differs from Sweep (per CLAUDE.md: README is source of truth for trade logic and must match when detection/drawing behavior changes)
+- [x] `fractal-model/README.md` — added a `## Reference HTF` section (sequence-level explanation, mirrors the `Calendar Level Sequence` section's shape but reflects the simpler no-C2/CISD scope), a `### Reference HTF Candle And Liquidity Mark` subsection under "What The Script Draws", and 3 rows in the settings table
 
 ## 8. Release
 - [ ] Manual validation in TradingView's Pine Editor (no local compiler) — golden path: enable Reference HTF on a custom timeframe different from the Fractal HTF, confirm candles/VT/HL/label draw correctly, confirm a Liquidity Mark fires only on breach + confirmed close-back (not on every new high), confirm it respects the Bias filter

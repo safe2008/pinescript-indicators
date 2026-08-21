@@ -48,8 +48,9 @@ Implements the **Reference HTF** and **Liquidity Mark** concepts defined in [`CO
 - [x] `DrawAllReference` composes the above (mirrors `DrawAll`), wired into Main Execution's drawing block gated on `ref_settings.enabled` + `valid_ref_htf`, using `ref_settings.offset`
 
 ## 6. Object-budget check
-- [ ] Count new persistent objects: candle body (1 box) + 2 wick lines + optional dow-style label per candle × max-display; VT line + 2 HL lines per candle; 1-2 label objects; 1 line per stored Liquidity Mark × history count
-- [ ] Re-check `max_boxes_count`/`max_lines_count`/`max_labels_count` in the `indicator(...)` call (`:3`) — these are already at Pine's hard ceiling (500 each); confirm headroom exists with Reference HTF's defaults enabled, note actual numbers, and cap default `max_display`/history-count low enough if not
+- [x] Counted at defaults (`max_display=4`, `liq_history=10`, VT/HL/label all on): `DrawReferenceCandles` = 4 boxes + 8 lines (body + 2 wicks × 4 candles); `DrawVTHLLines` (reused) = 4 VT lines (all candles) + 6 HL lines (skips the forming candle, `i != 0`) = 10 lines; `DrawReferenceLabel` = 1-2 labels (`label_position` defaults to `'Top'` → 1); `DrawLiquidityMarks` = up to 10 lines (`liq_history`). Total at defaults: **4 boxes, ~28 lines, 1-2 labels** — negligible against the 500/500/500 ceiling (`:3`), even stacked on top of the primary track + 3 Calendar sources.
+- [x] `max_boxes_count`/`max_lines_count`/`max_labels_count` (`:3`) left unchanged — no headroom problem at defaults, no reason to raise
+- [x] No new `maxval` added to `htf2.settings.max_display` or `ref_settings.liq_history` — the primary track's own `htf.settings.max_display` (`:724`) has no `maxval` either; this is an existing accepted pattern (user's own input, not new risk this feature introduces), not something in scope to newly guard against
 
 ## 7. Docs
 - [x] `CONTEXT.md` — Reference HTF and Liquidity Mark terms added (this session)

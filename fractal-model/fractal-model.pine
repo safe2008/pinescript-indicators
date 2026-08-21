@@ -421,7 +421,8 @@ var int ref_unswept_high_idx = na
 var float ref_unswept_low = na
 var int ref_unswept_low_idx = na
 
-// Confirmed Liquidity Marks — trimmed to ref_settings.liq_history (trim logic added later)
+// Confirmed Liquidity Marks — newest unshifted to index 0, trimmed to ref_settings.liq_history
+// in MonitorReference() on each confirmed mark (mirrors TrimSetups' pop-while-over-limit shape).
 var array<LiquidityMark> ref_liq_marks = array.new<LiquidityMark>()
 
 // Initialize drawing bin
@@ -2211,10 +2212,11 @@ method Update(CandleSet candleSet) =>
 // trim-when-over-max_display block, :2112-2137, :2139-2143, :2179-2181) but as its own smaller
 // method rather than a flag added to Monitor(): Monitor()'s body is dominated by
 // live_bearish/live_bullish Setup progression (:1457-2110) that doesn't apply here — Reference
-// HTF has no Setup pipeline, only a Liquidity Mark (CONTEXT.md). Also omits the "cosmetic
-// sweep" detection block (:2144-2178) that pushes to candleSet.sweeps — Liquidity Mark
-// detection is a separate, not-yet-built piece (Tasks.md section 4); candleSet.sweeps stays
-// permanently empty for htf2 per the c38a31c scaffolding comment. Trim also skips the
+// HTF has no Setup pipeline, only a Liquidity Mark (CONTEXT.md). In place of Monitor()'s
+// "cosmetic sweep" block (:2144-2178, which pushes to candleSet.sweeps), this method runs its
+// own Liquidity Mark detection (Tasks.md section 4) against the running unswept-high/low
+// trackers — candleSet.sweeps stays permanently empty for htf2 per the c38a31c scaffolding
+// comment; Liquidity Mark uses its own type/array (ref_liq_marks) instead. Trim also skips the
 // sweep-cleanup step Monitor()'s trim does (:2182-2187) for the same reason — nothing to clean.
 method MonitorReference(CandleSet candleSet, bool isNewCandle) =>
     if isNewCandle
@@ -2249,6 +2251,51 @@ method MonitorReference(CandleSet candleSet, bool isNewCandle) =>
         if candleSet.candles.size() > 1
             Candle prev = candleSet.candles.get(1)
             prev.c_time := candle.o_time
+
+        // Liquidity Mark detection (Tasks.md section 4) — mirrors the cosmetic-sweep block's
+        // breach-and-close-back shape (:2144-2172) but checks the just-completed candle (index 1)
+        // against a running tracked extreme (nearest unswept high/low) instead of the
+        // immediately preceding candle, per CONTEXT.md's Liquidity Mark definition. The tracker
+        // only ever becomes MORE extreme (new higher high / lower low) until it is actually
+        // swept — a breach that doesn't close back through isn't a mark, it just advances the
+        // tracker to this candle's own high/low, which then stands as the new nearest-unswept
+        // level. Deliberately does not touch candleSet.sweeps/Setup — no C2/CISD follows.
+        if candleSet.candles.size() > 1
+            Candle prev_candle = candleSet.candles.get(1)
+
+            // High side: breach = prev_candle.h wicks above the tracked unswept high;
+            // confirmed = that same candle's close comes back below it.
+            if na(ref_unswept_high) or prev_candle.h > ref_unswept_high
+                bool high_mark_confirmed = not na(ref_unswept_high) and prev_candle.c < ref_unswept_high
+                if high_mark_confirmed
+                    LiquidityMark mark = LiquidityMark.new()
+                    mark.price := ref_unswept_high
+                    mark.extreme_idx := ref_unswept_high_idx
+                    mark.confirm_idx := prev_candle.c_idx
+                    mark.is_high := true
+                    ref_liq_marks.unshift(mark)
+                    while ref_liq_marks.size() > ref_settings.liq_history
+                        ref_liq_marks.pop()
+                // Tracker becomes this candle's own high — first seed (was na), new unswept
+                // extreme (breached but didn't close back), or the fresh restart after a
+                // confirmed mark (that level is now taken; start tracking from here).
+                ref_unswept_high := prev_candle.h
+                ref_unswept_high_idx := prev_candle.h_idx
+
+            // Low side — mirrors high side.
+            if na(ref_unswept_low) or prev_candle.l < ref_unswept_low
+                bool low_mark_confirmed = not na(ref_unswept_low) and prev_candle.c > ref_unswept_low
+                if low_mark_confirmed
+                    LiquidityMark mark = LiquidityMark.new()
+                    mark.price := ref_unswept_low
+                    mark.extreme_idx := ref_unswept_low_idx
+                    mark.confirm_idx := prev_candle.c_idx
+                    mark.is_high := false
+                    ref_liq_marks.unshift(mark)
+                    while ref_liq_marks.size() > ref_settings.liq_history
+                        ref_liq_marks.pop()
+                ref_unswept_low := prev_candle.l
+                ref_unswept_low_idx := prev_candle.l_idx
 
         // Remove oldest candle if exceeds max_display
         if candleSet.candles.size() > candleSet.settings.max_display

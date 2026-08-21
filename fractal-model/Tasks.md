@@ -33,10 +33,10 @@ Implements the **Reference HTF** and **Liquidity Mark** concepts defined in [`CO
 - [x] No `calculate_on_close`/`should_run_monitor` gating needed — no live Setup tracking to gate; `MonitorReference`'s own `if isNewCandle` guard is sufficient, `Update()` runs every tick like primary
 
 ## 4. Liquidity Mark detection
-- [ ] On each new Reference HTF candle: check completed prior candle's high against the running unswept-high tracker (update tracker if not yet swept and new candle's high exceeds it); same for low against unswept-low tracker
-- [ ] Confirmed-close condition (Q1 round 3): wick beyond the tracked extreme, then that same candle's close back inside — mirror the shape of `:2038-2039` (`high_breached and prev_candle.c < prev_prev_candle.h`) but evaluated against the tracked running extreme, not `prev_prev_candle`
-- [ ] On confirmed mark: reset that side's tracker (it's been "taken"), push a mark record, trim to the history-count input (mirror `:2062-2065`'s trim pattern)
-- [ ] Apply `settings.bias` filter at draw time (skip low-side marks when Bearish-only, high-side when Bullish-only) — no new bias state, just a condition in the draw step (Q1 round 4)
+- [x] On each new Reference HTF candle: check completed prior candle's high against the running unswept-high tracker (update tracker if not yet swept and new candle's high exceeds it); same for low against unswept-low tracker
+- [x] Confirmed-close condition (Q1 round 3): wick beyond the tracked extreme, then that same candle's close back inside — mirror the shape of `:2038-2039` (`high_breached and prev_candle.c < prev_prev_candle.h`) but evaluated against the tracked running extreme, not `prev_prev_candle`
+- [x] On confirmed mark: reset that side's tracker (it's been "taken"), push a mark record, trim to the history-count input (mirror `:2062-2065`'s trim pattern)
+- [ ] Apply `settings.bias` filter at draw time (skip low-side marks when Bearish-only, high-side when Bullish-only) — no new bias state, just a condition in the draw step (Q1 round 4) — **deferred to section 5**, detection intentionally records both sides unconditionally
 
 ## 5. Drawing
 - [ ] `DrawReferenceCandles` / `DrawReferenceVTHL` / `DrawReferenceLabel` sibling methods reading the new dedicated settings struct (Key Finding 1) — do not modify `DrawCandles`/`DrawVTHLLines`/`DrawLabels`

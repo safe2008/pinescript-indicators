@@ -27,10 +27,10 @@ Implements the **Reference HTF** and **Liquidity Mark** concepts defined in [`CO
 - [x] Liquidity Mark storage: `type LiquidityMark` (price, extreme_idx, confirm_idx, is_high) + `var array<LiquidityMark> ref_liq_marks` — bounded by the new history-count input (trim logic left for section 4), not `candleSet.sweeps` (that array feeds `DrawSweeps` → primary-only colors/toggle)
 
 ## 3. Reference HTF candle building
-- [ ] Own `isNewRefHTFCandle` — textually distinct `ta.change(time(ref_htf_timeframe))` call site in Main Execution (see Key Finding 3 — do **not** parameterize/share with `isNewHTFCandle`)
-- [ ] `htf2.Update()` every bar (mirrors `Update` `:2079-2095` — running h/l/c on the forming candle)
-- [ ] `htf2.Monitor(isNewRefHTFCandle)` or a trimmed sibling — needs the candle-append + trim-to-`max_display` logic from `:2000-2025` / `:2067-2078`, but **without** the `live_bearish`/`live_bullish` `Setup` progression that makes up most of `Monitor`'s body (`:1345-1975`) — confirm whether to strip a copy of `Monitor` down or write a smaller dedicated method; Reference HTF has no `Setup`s to progress
-- [ ] Confirm `should_run_monitor`/`calculate_on_close` gating (`:3058-3061`) applies the same way, or decide Reference HTF always runs live (no live-setup performance tradeoff to gate, since there's no live tracking)
+- [x] Own `isNewRefHTFCandle` — textually distinct `ta.change(time(ref_settings.custom_tf))` call site in Main Execution, not shared/parameterized with `isNewHTFCandleTf` or any Calendar call site
+- [x] `htf2.Update()` every bar — confirmed the existing `Update(CandleSet candleSet)` is already fully generic, used unmodified
+- [x] `method MonitorReference(CandleSet candleSet, bool isNewCandle)` — new dedicated method (not a flag on `Monitor`), candle-append + trim-to-`max_display` only, no `Setup` progression, no cosmetic-sweep block
+- [x] No `calculate_on_close`/`should_run_monitor` gating needed — no live Setup tracking to gate; `MonitorReference`'s own `if isNewCandle` guard is sufficient, `Update()` runs every tick like primary
 
 ## 4. Liquidity Mark detection
 - [ ] On each new Reference HTF candle: check completed prior candle's high against the running unswept-high tracker (update tracker if not yet swept and new candle's high exceeds it); same for low against unswept-low tracker

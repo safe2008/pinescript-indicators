@@ -2206,6 +2206,56 @@ method Update(CandleSet candleSet) =>
             candleSet.trace.start_price := candle.o
     candleSet
 
+// Reference HTF candle building (Tasks.md section 3) — mirrors the candle-append + trim-to-
+// max_display portion of Monitor() above (the Candle.new()/unshift/close-time-on-previous/
+// trim-when-over-max_display block, :2112-2137, :2139-2143, :2179-2181) but as its own smaller
+// method rather than a flag added to Monitor(): Monitor()'s body is dominated by
+// live_bearish/live_bullish Setup progression (:1457-2110) that doesn't apply here — Reference
+// HTF has no Setup pipeline, only a Liquidity Mark (CONTEXT.md). Also omits the "cosmetic
+// sweep" detection block (:2144-2178) that pushes to candleSet.sweeps — Liquidity Mark
+// detection is a separate, not-yet-built piece (Tasks.md section 4); candleSet.sweeps stays
+// permanently empty for htf2 per the c38a31c scaffolding comment. Trim also skips the
+// sweep-cleanup step Monitor()'s trim does (:2182-2187) for the same reason — nothing to clean.
+method MonitorReference(CandleSet candleSet, bool isNewCandle) =>
+    if isNewCandle
+        Candle candle = Candle.new()
+        candle.o := open
+        candle.c := close
+        candle.h := high
+        candle.l := low
+        candle.o_time := time
+        candle.o_idx := bar_index
+        candle.c_idx := bar_index
+        candle.h_idx := bar_index
+        candle.l_idx := bar_index
+        candle.dow := switch
+            candleSet.settings.htf == '1D' =>
+                DayofWeek(dayofweek(time_tradingday, "America/New_York"))
+            candleSet.settings.htf == '1W' =>
+                str.format_time(candle.o_time, 'MMM d', 'America/New_York')
+            candleSet.settings.htf == '1M' =>
+                str.format_time(candle.o_time, 'MMM', 'America/New_York')
+            candleSet.settings.htf == '3M' =>
+                int m = month(candle.o_time, 'America/New_York')
+                m <= 3 ? 'Q1' : m <= 6 ? 'Q2' : m <= 9 ? 'Q3' : 'Q4'
+            candleSet.settings.htf == '12M' =>
+                ''
+            =>
+                str.format_time(candle.o_time, 'HH:mm', 'America/New_York')
+
+        candleSet.candles.unshift(candle)
+
+        // Set close time on previous candle (now at index 1)
+        if candleSet.candles.size() > 1
+            Candle prev = candleSet.candles.get(1)
+            prev.c_time := candle.o_time
+
+        // Remove oldest candle if exceeds max_display
+        if candleSet.candles.size() > candleSet.settings.max_display
+            array.pop(candleSet.candles)
+
+    candleSet
+
 // Calendar Level period tracking (Task 3, revised) — prior_high/prior_low (the swept
 // reference: Calendar High/Low, labeled PDH/PDL, PWH/PWL, PMH/PML on chart, CONTEXT.md) now
 // come from request.security(tf, [high[1], low[1]], lookahead=barmerge.lookahead_on) —
@@ -3184,6 +3234,21 @@ if valid_htf
         htf.Monitor(isNewHTFCandle)
     // HTF candle updates - always run every tick
     htf.Update()
+
+// Reference HTF — second, independently-configured HTF candle series (CONTEXT.md), gated on
+// its own enable toggle + ValidTimeframe check (mirrors valid_htf above), independent of the
+// Fractal selector. isNewRefHTFCandle is its own textually distinct ta.change(time(...)) call
+// site — deliberately NOT shared with isNewHTFCandleTf above or parameterized into a helper:
+// ta.change()/time() are keyed by call site, not argument, and sharing one call site across
+// sources already caused a real bug once (Task 12 / commit 48ef2f1, see the Calendar Level
+// comment block below). No calculate_on_close/should_run_monitor gating here (Tasks.md section
+// 3) — Reference HTF has no live Setup tracking to gate for performance, so MonitorReference's
+// own `if isNewCandle` guard is the only gate needed; Update runs every tick, same as primary.
+bool isNewRefHTFCandle = ta.change(time(ref_settings.custom_tf)) > 0
+bool valid_ref_htf = ValidTimeframe(ref_settings.custom_tf)
+if ref_settings.enabled and valid_ref_htf
+    htf2.MonitorReference(isNewRefHTFCandle)
+    htf2.Update()
 
 // Calendar Level period tracking + sweep detection - independent of the Fractal selector /
 // valid_htf gate above, runs every tick for each enabled source (Day/Week/Month).
